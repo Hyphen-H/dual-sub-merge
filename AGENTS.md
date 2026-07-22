@@ -25,9 +25,10 @@ Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `
 | `lib/services/bilingual_inline.dart` | 行内/单行双语检测 |
 | `lib/services/bilingual_split.dart` | `\N` 双语拆成中/外 |
 | `lib/services/bilingual_convert_service.dart` | 双语文件 → `.chs+eng.ass` |
-| `lib/services/language_from_name.dart` | 文件名语言 token、前缀归一化 |
-| `lib/services/file_matcher.dart` | 目录扫描与分组 |
-| `lib/services/merge_service.dart` | 端到端编排；尊重 `selectedPrefixes` |
+| `lib/services/language_from_name.dart` | 文件名语言 token、前缀归一化、`hasTrailingLanguageTag` |
+| `lib/services/language_tag_rename_service.dart` | 无标记字幕移入 chs-sub/eng-sub |
+| `lib/services/file_matcher.dart` | 目录扫描与分组（含 extract / chs-sub / eng-sub） |
+| `lib/services/merge_service.dart` | 端到端编排；尊重 `selectedPrefixes`；可选改名 |
 | `lib/services/extract/` | 容器轨探测与抽取 |
 | `lib/ui/` | 页面；重逻辑放 services |
 | `test/` | 单测；清洗/黑名单/双语/解析必测 |
@@ -40,11 +41,14 @@ Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `
 4. **HTML 斜体**：`<i>`/`<em>` → `{\i1}` / `{\i0}`（在 `text_pipeline`）。  
 5. **样式优先级**：Lyric > annotation(`\an8`) > 中下 / 英上。  
 6. **黑名单**：仅 `removeCredits == true` 时生效；默认规则用**锚定正则**，防误删对白。  
-7. **双语成品（`\N` 上下中英）**：扫描为 `GroupKind.bilingualFile`，可转换则拆成双轨写出 `.chs+eng.ass`（保留源）；无法可靠拆分则跳过并汇总。无 `\N` 的单行混排不切开。  
+7. **双语成品（`\N` 上下中英）**：扫描为 `GroupKind.bilingualFile`（UI：**样式转换**），可转换则拆成双轨写出 `.chs+eng.ass`（保留源）；无法可靠拆分则跳过并汇总。无 `\N` 的单行混排不切开。  
 8. **勾选**：扫描后默认 `selected = true`；合并只处理勾选项（`MergeService.selectedPrefixes`）。  
 9. **抽轨**：中文 chs；外文 eng → 无则 sdh → 再无 Prompt，选择可应用到同文件夹其余视频。跳过 PGS/VobSub。  
-10. **输出**：`{displayPrefix}.chs+eng.ass`，默认 PlayRes 1920×1080。  
-11. **拖拽**：`desktop_drop`；目录/字幕/视频 → 设工作目录并扫描；`dragAutoRun` 默认 false。
+10. **输出**：`{displayPrefix}.chs+eng.ass`，默认 PlayRes 1920×1080。写出目录由 `OutputDirMode` 决定：默认 `输入/dual-sub-merged/`（合并时不存在则创建）；可选源文件夹或自定义路径（自定义时快捷勾选变灰）。扫描/抽轨仍用输入目录。  
+11. **拖拽**：`desktop_drop`；目录/字幕/视频 → 设**输入**目录并扫描；`dragAutoRun` 默认 false。  
+12. **列表清空**：仅清扫描分组，不重置输入/输出路径设置。  
+13. **标记语言改名**（`tagLanguageOnMerge`，默认 false）：仅无尾部语言标记且角色已识别的中/外源字幕；**移动**到 `chs-sub/`、`eng-sub/`，文件名插入 `.chs`/`.eng`。扫描需包含这两子目录。双语源不改名。提供「仅改名」与「改名并合并」。  
+14. **列表 UI**：每组中在上、外在下；kind 带图标与 ⓘ tooltip（配对 / 样式转换 / 视频）。
 
 ## 代码风格
 

@@ -95,6 +95,23 @@ class LanguageFromName {
     return TrackRole.unknown;
   }
 
+  /// True when basename ends with a known language token (requires separator,
+  /// so words like "episode" are not treated as tagged via trailing "de").
+  static bool hasTrailingLanguageTag(String path) {
+    final base = p.basenameWithoutExtension(path);
+    return RegExp(
+      r'(?:^|[.\s_\-\[\]()])(?:'
+      r'chs|cht|zh|cn|chi|zho|gb|big5|sc|tc|'
+      r'eng|en|en-us|en-gb|english|'
+      r'jpn|jp|jap|kor|ko|'
+      r'fre|fr|fra|ger|de|deu|spa|es|rus|ru|ita|it|por|pt|vie|vi|tha|th|ara|ar|'
+      r'sdh|cc|extracted|'
+      r'简体|繁体|繁中|简中|中字|中文|英文|外挂'
+      r')$',
+      caseSensitive: false,
+    ).hasMatch(base);
+  }
+
   /// Content majority vote fallback.
   static TrackRole fromContent(Iterable<String> rawTexts, {int sample = 40}) {
     var zh = 0;

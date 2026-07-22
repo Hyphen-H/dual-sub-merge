@@ -14,6 +14,12 @@ class ResolutionPreset {
   ];
 }
 
+enum OutputDirMode {
+  source,
+  mergedSubdir,
+  custom,
+}
+
 class MergeOptions {
   MergeOptions({
     this.playResX = 1920,
@@ -23,6 +29,9 @@ class MergeOptions {
     this.extractSubdir = 'dual-sub-merge-extract',
     this.overwrite = true,
     this.dragAutoRun = false,
+    this.tagLanguageOnMerge = false,
+    this.outputDirMode = OutputDirMode.mergedSubdir,
+    this.customOutputDir = '',
     this.mkvToolNixDir = '',
     this.ffmpegPath = '',
     this.ffprobePath = '',
@@ -30,6 +39,8 @@ class MergeOptions {
     List<String>? styleLines,
   })  : blacklistRules = blacklistRules ?? List<String>.from(defaultBlacklistRules),
         styleLines = styleLines ?? List<String>.from(StyleCatalog.defaultStyleLines);
+
+  static const mergedSubdirName = 'dual-sub-merged';
 
   int playResX;
   int playResY;
@@ -39,6 +50,10 @@ class MergeOptions {
   bool overwrite;
   /// After drag-drop scan, automatically start processing.
   bool dragAutoRun;
+  /// Move untagged subs into chs-sub/eng-sub with .chs/.eng before merge.
+  bool tagLanguageOnMerge;
+  OutputDirMode outputDirMode;
+  String customOutputDir;
   String mkvToolNixDir;
   String ffmpegPath;
   String ffprobePath;

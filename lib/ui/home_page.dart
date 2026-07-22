@@ -13,6 +13,7 @@ import '../services/extract/extract_service.dart';
 import '../services/extract/track_info.dart';
 import '../services/extract/track_selector.dart';
 import '../services/file_matcher.dart';
+import '../services/language_tag_rename_service.dart';
 import '../services/merge_service.dart';
 import '../services/parse/subtitle_loader.dart';
 import 'blacklist_page.dart';
@@ -62,11 +63,53 @@ class _HomePageState extends State<HomePage> {
   Future<void> _persist() => AppSettings.saveOptions(_options);
 
   Future<void> _pickDir() async {
-    final path = await FilePicker.getDirectoryPath(dialogTitle: '选择字幕/视频文件夹');
+    final path = await FilePicker.getDirectoryPath(dialogTitle: '选择输入文件夹');
     if (path == null) return;
     setState(() => _dir = path);
     await AppSettings.saveLastDir(path);
     await _scan();
+  }
+
+  Future<void> _pickOutputDir() async {
+    final path = await FilePicker.getDirectoryPath(dialogTitle: '选择输出文件夹');
+    if (path == null) return;
+    setState(() {
+      _options.outputDirMode = OutputDirMode.custom;
+      _options.customOutputDir = path;
+    });
+    await _persist();
+  }
+
+  void _setOutputMode(OutputDirMode mode) {
+    setState(() => _options.outputDirMode = mode);
+    _persist();
+  }
+
+  String? _resolvedOutputDir() {
+    switch (_options.outputDirMode) {
+      case OutputDirMode.source:
+        return _dir;
+      case OutputDirMode.mergedSubdir:
+        if (_dir == null) return null;
+        return p.join(_dir!, MergeOptions.mergedSubdirName);
+      case OutputDirMode.custom:
+        final c = _options.customOutputDir.trim();
+        return c.isEmpty ? null : c;
+    }
+  }
+
+  String _outputDirLabel() {
+    final path = _resolvedOutputDir();
+    if (path != null) return path;
+    return switch (_options.outputDirMode) {
+      OutputDirMode.source => '未选择输入文件夹',
+      OutputDirMode.mergedSubdir => '未选择输入文件夹（将使用 …/dual-sub-merged）',
+      OutputDirMode.custom => '未指定输出文件夹',
+    };
+  }
+
+  void _clearList() {
+    setState(() => _groups = []);
   }
 
   Future<void> _scan({bool keepSelection = false}) async {
@@ -111,9 +154,64 @@ class _HomePageState extends State<HomePage> {
     });
   }
 
+  Future<void> _renameOnly() async {
+    if (_dir == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先选择输入文件夹')));
+      return;
+    }
+    final selected = _groups.where((g) => g.selected).toList();
+    if (selected.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请至少勾选一组字幕')));
+      return;
+    }
+    setState(() {
+      _busy = true;
+      _progress = '标记语言改名…';
+    });
+    try {
+      final r = await LanguageTagRenameService().renameGroups(
+        inputDir: Directory(_dir!),
+        groups: selected,
+        overwrite: _options.overwrite,
+      );
+      _log
+        ..writeln('—— 仅改名 ——')
+        ..writeln(r.logs.join('\n'))
+        ..writeln('完成 ${r.renamedCount}，跳过 ${r.skippedCount}，失败 ${r.failCount}');
+      await _scan(keepSelection: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '改名完成：${r.renamedCount} 个文件'
+              '${r.failCount > 0 ? '，失败 ${r.failCount}' : ''}',
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      _log.writeln('改名失败: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('改名失败: $e')));
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _busy = false;
+          _progress = '';
+        });
+      }
+    }
+  }
+
   Future<void> _run() async {
     if (_dir == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先选择文件夹')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先选择输入文件夹')));
+      return;
+    }
+    final outPath = _resolvedOutputDir();
+    if (outPath == null || outPath.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('请先选择输出文件夹')));
       return;
     }
     final selected = _groups.where((g) => g.selected).map((g) => g.prefix).toSet();
@@ -143,7 +241,10 @@ class _HomePageState extends State<HomePage> {
     );
 
     try {
-      final result = await service.run(Directory(_dir!));
+      final result = await service.run(
+        Directory(_dir!),
+        outputDir: Directory(outPath),
+      );
       _log
         ..writeln('—— 完成 ——')
         ..writeln('成功 ${result.successCount} / 失败 ${result.failCount}')
@@ -530,7 +631,7 @@ class _HomePageState extends State<HomePage> {
               children: [
                 Expanded(
                   child: Text(
-                    _dir ?? '未选择文件夹',
+                    _dir ?? '未选择输入文件夹',
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -538,15 +639,87 @@ class _HomePageState extends State<HomePage> {
                 OutlinedButton.icon(
                   onPressed: _busy ? null : _pickDir,
                   icon: const Icon(Icons.folder_open),
-                  label: const Text('选择文件夹'),
+                  label: const Text('选择输入文件夹'),
                 ),
                 const SizedBox(width: 8),
                 OutlinedButton.icon(
-                  onPressed: _busy || _dir == null ? null : _scan,
+                  onPressed: _busy || _dir == null ? null : () => _scan(),
                   icon: const Icon(Icons.refresh),
                   label: const Text('重新扫描'),
                 ),
               ],
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _outputDirLabel(),
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _pickOutputDir,
+                  icon: const Icon(Icons.drive_folder_upload_outlined),
+                  label: const Text('选择输出文件夹'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Builder(
+              builder: (context) {
+                final custom = _options.outputDirMode == OutputDirMode.custom;
+                final chipEnabled = !_busy && !custom;
+                return Wrap(
+                  spacing: 4,
+                  runSpacing: 0,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Checkbox(
+                          value: _options.outputDirMode == OutputDirMode.source,
+                          onChanged: chipEnabled
+                              ? (v) {
+                                  if (v == true) {
+                                    _setOutputMode(OutputDirMode.source);
+                                  }
+                                }
+                              : null,
+                        ),
+                        const Text('源文件夹'),
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Checkbox(
+                          value:
+                              _options.outputDirMode == OutputDirMode.mergedSubdir,
+                          onChanged: chipEnabled
+                              ? (v) {
+                                  if (v == true) {
+                                    _setOutputMode(OutputDirMode.mergedSubdir);
+                                  }
+                                }
+                              : null,
+                        ),
+                        const Text('源文件夹/dual-sub-merged'),
+                      ],
+                    ),
+                    if (custom)
+                      TextButton(
+                        onPressed: _busy
+                            ? null
+                            : () => _setOutputMode(OutputDirMode.mergedSubdir),
+                        child: const Text('改回快捷目录'),
+                      ),
+                  ],
+                );
+              },
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -604,10 +777,43 @@ class _HomePageState extends State<HomePage> {
                           await _persist();
                         },
                 ),
+                Tooltip(
+                  message:
+                      '开启后：无语言标记的源字幕将移动到输入目录下 chs-sub/、eng-sub/，并另存为 *.chs.* / *.eng.*',
+                  child: FilterChip(
+                    label: const Text('标记语言改名'),
+                    selected: _options.tagLanguageOnMerge,
+                    onSelected: _busy
+                        ? null
+                        : (v) async {
+                            setState(() => _options.tagLanguageOnMerge = v);
+                            final messenger = ScaffoldMessenger.of(context);
+                            await _persist();
+                            if (!mounted) return;
+                            if (v) {
+                              messenger.showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    '已启用：无标记字幕将移入 chs-sub/eng-sub 并加上 .chs/.eng；主按钮变为「改名并合并」',
+                                  ),
+                                  duration: Duration(seconds: 4),
+                                ),
+                              );
+                            }
+                          },
+                  ),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _renameOnly,
+                  icon: const Icon(Icons.drive_file_rename_outline),
+                  label: const Text('仅改名'),
+                ),
                 FilledButton.icon(
                   onPressed: _busy ? null : _run,
                   icon: const Icon(Icons.play_arrow),
-                  label: const Text('开始合并'),
+                  label: Text(
+                    _options.tagLanguageOnMerge ? '改名并合并' : '开始合并',
+                  ),
                 ),
                 if (_busy) ...[
                   const SizedBox(
@@ -636,6 +842,10 @@ class _HomePageState extends State<HomePage> {
                     onPressed: _busy ? null : () => _selectAll(false),
                     child: const Text('全不选'),
                   ),
+                  TextButton(
+                    onPressed: _busy || _groups.isEmpty ? null : _clearList,
+                    child: const Text('清空'),
+                  ),
                   const Spacer(),
                   Text(
                     '拖入文件夹/字幕/视频；\\N 双语可转换；取消勾选=不处理',
@@ -650,44 +860,18 @@ class _HomePageState extends State<HomePage> {
                 clipBehavior: Clip.antiAlias,
                 child: _groups.isEmpty
                     ? const Center(
-                        child: Text('选择或拖入文件夹 / 字幕 / 视频\n支持配对合并与 \\N 双语转换'),
+                        child: Text('选择或拖入输入文件夹 / 字幕 / 视频\n支持配对合并与 \\N 样式转换'),
                       )
                     : ListView.separated(
                         itemCount: _groups.length,
                         separatorBuilder: (_, _) => const Divider(height: 1),
                         itemBuilder: (ctx, i) {
                           final g = _groups[i];
-                          return CheckboxListTile(
-                            dense: true,
-                            value: g.selected,
-                            onChanged: _busy
-                                ? null
-                                : (v) => setState(() => g.selected = v ?? false),
-                            controlAffinity: ListTileControlAffinity.leading,
-                            title: Text(
-                              '[${g.kindLabel}] ${g.outputBase}',
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            subtitle: Text(
-                              [
-                                if (g.bilingualSource != null)
-                                  '双语: ${p.basename(g.bilingualSource!.path)}',
-                                if (g.chinese != null) '中: ${p.basename(g.chinese!.file.path)}',
-                                if (g.foreign != null) '外: ${p.basename(g.foreign!.file.path)}',
-                                if (g.video != null) '视频: ${p.basename(g.video!.path)}',
-                                g.message,
-                              ].where((e) => e.isNotEmpty).join('  |  '),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            secondary: Text(
-                              g.status.name,
-                              style: TextStyle(
-                                color: _statusColor(g.status),
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                          return _GroupTile(
+                            group: g,
+                            busy: _busy,
+                            statusColor: _statusColor(g.status),
+                            onSelected: (v) => setState(() => g.selected = v),
                           );
                         },
                       ),
@@ -747,7 +931,7 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                     child: const Text(
-                      '释放以添加文件夹 / 字幕 / 视频',
+                      '释放以设为输入文件夹 / 添加字幕 / 视频',
                       style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -755,6 +939,134 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _GroupTile extends StatelessWidget {
+  const _GroupTile({
+    required this.group,
+    required this.busy,
+    required this.statusColor,
+    required this.onSelected,
+  });
+
+  final MatchGroup group;
+  final bool busy;
+  final Color statusColor;
+  final ValueChanged<bool> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final g = group;
+    final theme = Theme.of(context);
+    final zhName = g.chinese != null ? p.basename(g.chinese!.file.path) : '—';
+    final enName = g.foreign != null ? p.basename(g.foreign!.file.path) : '—';
+
+    return InkWell(
+      onTap: busy ? null : () => onSelected(!g.selected),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Checkbox(
+              value: g.selected,
+              onChanged: busy ? null : (v) => onSelected(v ?? false),
+            ),
+            const SizedBox(width: 4),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(g.kindIcon, size: 18, color: theme.colorScheme.primary),
+                      const SizedBox(width: 6),
+                      Text(
+                        g.kindLabel,
+                        style: theme.textTheme.labelLarge?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 2),
+                      Tooltip(
+                        message: g.kindTooltip,
+                        child: Icon(
+                          Icons.info_outline,
+                          size: 16,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          g.outputBase,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        g.status.name,
+                        style: TextStyle(
+                          color: statusColor,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '中：$zhName',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '外：$enName',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  if (g.bilingualSource != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '源：${p.basename(g.bilingualSource!.path)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                  if (g.video != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '视频：${p.basename(g.video!.path)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ],
+                  if (g.message.isNotEmpty) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      g.message,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

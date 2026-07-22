@@ -7,10 +7,16 @@ import '../models/track_role.dart';
 import 'bilingual_inline.dart';
 import 'bilingual_split.dart';
 import 'language_from_name.dart';
+import 'language_tag_rename_service.dart';
 import 'parse/subtitle_loader.dart';
 
 class FileMatcher {
   static final _videoExts = {'.mkv', '.mp4'};
+
+  static final _extraSubdirs = {
+    LanguageTagRenameService.chsSubdir,
+    LanguageTagRenameService.engSubdir,
+  };
 
   static Future<List<MatchGroup>> scanDirectory(
     Directory dir, {
@@ -19,7 +25,9 @@ class FileMatcher {
     final entities = await dir.list(recursive: false).toList();
     final subFiles = <File>[];
     for (final e in entities) {
-      if (e is Directory && p.basename(e.path) == extractSubdir) {
+      if (e is! Directory) continue;
+      final name = p.basename(e.path);
+      if (name == extractSubdir || _extraSubdirs.contains(name)) {
         subFiles.addAll(
           await e.list().where((x) => x is File).cast<File>().toList(),
         );

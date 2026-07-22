@@ -10,12 +10,31 @@ class AppSettings {
   static const _kExtractDir = 'extractSubdir';
   static const _kOverwrite = 'overwrite';
   static const _kDragAutoRun = 'dragAutoRun';
+  static const _kTagLanguage = 'tagLanguageOnMerge';
+  static const _kOutputDirMode = 'outputDirMode';
+  static const _kCustomOutputDir = 'customOutputDir';
   static const _kMkvDir = 'mkvToolNixDir';
   static const _kFfmpeg = 'ffmpegPath';
   static const _kFfprobe = 'ffprobePath';
   static const _kBlacklist = 'blacklistRules';
   static const _kStyles = 'styleLines';
   static const _kLastDir = 'lastDir';
+
+  static OutputDirMode _parseOutputMode(String? raw) {
+    return switch (raw) {
+      'source' => OutputDirMode.source,
+      'custom' => OutputDirMode.custom,
+      _ => OutputDirMode.mergedSubdir,
+    };
+  }
+
+  static String _encodeOutputMode(OutputDirMode m) {
+    return switch (m) {
+      OutputDirMode.source => 'source',
+      OutputDirMode.mergedSubdir => 'mergedSubdir',
+      OutputDirMode.custom => 'custom',
+    };
+  }
 
   static Future<MergeOptions> loadOptions() async {
     final p = await SharedPreferences.getInstance();
@@ -27,6 +46,9 @@ class AppSettings {
       extractSubdir: p.getString(_kExtractDir) ?? 'dual-sub-merge-extract',
       overwrite: p.getBool(_kOverwrite) ?? true,
       dragAutoRun: p.getBool(_kDragAutoRun) ?? false,
+      tagLanguageOnMerge: p.getBool(_kTagLanguage) ?? false,
+      outputDirMode: _parseOutputMode(p.getString(_kOutputDirMode)),
+      customOutputDir: p.getString(_kCustomOutputDir) ?? '',
       mkvToolNixDir: p.getString(_kMkvDir) ?? '',
       ffmpegPath: p.getString(_kFfmpeg) ?? '',
       ffprobePath: p.getString(_kFfprobe) ?? '',
@@ -45,6 +67,9 @@ class AppSettings {
     await p.setString(_kExtractDir, o.extractSubdir);
     await p.setBool(_kOverwrite, o.overwrite);
     await p.setBool(_kDragAutoRun, o.dragAutoRun);
+    await p.setBool(_kTagLanguage, o.tagLanguageOnMerge);
+    await p.setString(_kOutputDirMode, _encodeOutputMode(o.outputDirMode));
+    await p.setString(_kCustomOutputDir, o.customOutputDir);
     await p.setString(_kMkvDir, o.mkvToolNixDir);
     await p.setString(_kFfmpeg, o.ffmpegPath);
     await p.setString(_kFfprobe, o.ffprobePath);

@@ -13,6 +13,7 @@ import 'extract/extract_service.dart';
 import 'extract/track_info.dart';
 import 'extract/track_selector.dart';
 import 'file_matcher.dart';
+import 'language_tag_rename_service.dart';
 import 'parse/ass_writer.dart';
 import 'parse/subtitle_loader.dart';
 import 'text_pipeline.dart';
@@ -75,7 +76,7 @@ class MergeService {
     return selectedPrefixes!.contains(g.prefix);
   }
 
-  Future<MergeResult> run(Directory dir) async {
+  Future<MergeResult> run(Directory dir, {Directory? outputDir}) async {
     final logs = <String>[];
     final skippedBilingual = <String>[];
     final outputs = <String>[];
@@ -83,6 +84,12 @@ class MergeService {
     var fail = 0;
     var removedCredits = 0;
     var convertedBilingual = 0;
+
+    final outDir = outputDir ?? dir;
+    if (!outDir.existsSync()) {
+      await outDir.create(recursive: true);
+    }
+    logs.add('输出目录: ${outDir.path}');
 
     final tools = await ToolResolver.resolve(
       mkvToolNixDir: options.mkvToolNixDir,
@@ -191,6 +198,23 @@ class MergeService {
           .toList();
     }
 
+    if (options.tagLanguageOnMerge) {
+      onProgress?.call(MergeProgress(
+        current: 0,
+        total: groups.length,
+        message: '标记语言改名…',
+      ));
+      final rename = await LanguageTagRenameService().renameGroups(
+        inputDir: dir,
+        groups: groups,
+        overwrite: options.overwrite,
+      );
+      logs.addAll(rename.logs);
+      logs.add(
+        '语言标记改名: 完成 ${rename.renamedCount}，跳过 ${rename.skippedCount}，失败 ${rename.failCount}',
+      );
+    }
+
     for (final g in groups) {
       if (!_isSelected(g)) continue;
       if (g.isReady) continue;
@@ -220,7 +244,7 @@ class MergeService {
         try {
           final r = await converter.convertFile(
             source: g.bilingualSource!,
-            outDir: dir,
+            outDir: outDir,
             displayPrefix: g.displayPrefix,
           );
           if (r.ok) {
@@ -264,7 +288,7 @@ class MergeService {
           final biFile = zhBi ? g.chinese!.file : g.foreign!.file;
           final r = await converter.convertFile(
             source: biFile,
-            outDir: dir,
+            outDir: outDir,
             displayPrefix: g.displayPrefix,
           );
           if (r.ok) {
@@ -301,7 +325,7 @@ class MergeService {
         ];
 
         final outName = '${g.outputBase}.chs+eng.ass';
-        final outPath = p.join(dir.path, outName);
+        final outPath = p.join(outDir.path, outName);
         if (!options.overwrite && File(outPath).existsSync()) {
           logs.add('[${g.outputBase}] 已存在，跳过: $outName');
           fail++;
