@@ -25,10 +25,8 @@ class MergeOptions {
     this.playResX = 1920,
     this.playResY = 1080,
     this.removeCredits = true,
-    this.extractFromVideo = true,
     this.extractSubdir = 'dual-sub-merge-extract',
     this.overwrite = true,
-    this.dragAutoRun = false,
     this.tagLanguageOnMerge = false,
     this.outputDirMode = OutputDirMode.mergedSubdir,
     this.customOutputDir = '',
@@ -45,11 +43,8 @@ class MergeOptions {
   int playResX;
   int playResY;
   bool removeCredits;
-  bool extractFromVideo;
   String extractSubdir;
   bool overwrite;
-  /// After drag-drop scan, automatically start processing.
-  bool dragAutoRun;
   /// Move untagged subs into chs-sub/eng-sub with .chs/.eng before merge.
   bool tagLanguageOnMerge;
   OutputDirMode outputDirMode;

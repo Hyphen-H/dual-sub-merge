@@ -23,7 +23,7 @@ void main() {
     expect(outDir.existsSync(), isFalse);
 
     final svc = MergeService(
-      options: MergeOptions(extractFromVideo: false, removeCredits: false),
+      options: MergeOptions(removeCredits: false),
     );
     final r = await svc.run(root, outputDir: outDir);
 
@@ -48,7 +48,7 @@ void main() {
     );
 
     final svc = MergeService(
-      options: MergeOptions(extractFromVideo: false, removeCredits: false),
+      options: MergeOptions(removeCredits: false),
     );
     final r = await svc.run(root);
     expect(r.successCount, 1);

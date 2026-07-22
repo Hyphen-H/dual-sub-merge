@@ -98,4 +98,26 @@ class MatchGroup {
         GroupKind.videoOnly =>
           '从 MKV/MP4 抽取文本字幕轨后再配对合并；跳过 PGS/VobSub 等图像字幕。',
       };
+
+  bool get statusOk => switch (status) {
+        GroupStatus.ready ||
+        GroupStatus.bilingualReady ||
+        GroupStatus.done =>
+          true,
+        _ => false,
+      };
+
+  /// Chinese label for abnormal status; empty when [statusOk].
+  String get statusLabelZh => switch (status) {
+        GroupStatus.ready ||
+        GroupStatus.bilingualReady ||
+        GroupStatus.done =>
+          '',
+        GroupStatus.missingChinese => '缺中文轨',
+        GroupStatus.missingForeign => '缺外文轨',
+        GroupStatus.conflict => '冲突',
+        GroupStatus.bilingualInline => '无法拆分',
+        GroupStatus.skipped => '已跳过',
+        GroupStatus.failed => '失败',
+      };
 }

@@ -2,8 +2,7 @@
 setlocal
 cd /d "%~dp0"
 
-REM Forward all args to PowerShell build script.
-REM Success path: script waits for any key then launches dual_sub_merge.exe
+REM Forward args to PowerShell. Default: flutter build --release only.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0build_desktop.ps1" %*
 set ERR=%ERRORLEVEL%
 

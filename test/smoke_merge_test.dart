@@ -10,7 +10,7 @@ void main() {
   );
 
   test("smoke merge young justice sample", () async {
-    final svc = MergeService(options: MergeOptions(extractFromVideo: false));
+    final svc = MergeService(options: MergeOptions());
     final r = await svc.run(dir);
     expect(r.successCount, 1);
     final out = File(p.join(dir.path, "Young.Justice.S02E01.chs+eng.ass"));

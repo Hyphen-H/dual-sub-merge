@@ -5,7 +5,7 @@
 ## 项目是什么
 
 Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `.chs+eng.ass`（Aegisub）。  
-不把中英压成同一条 Dialogue；清洗文本、统一四套 HDRipad 样式；可选删致谢、可选从视频抽轨。
+不把中英压成同一条 Dialogue；清洗文本、统一四套 HDRipad 样式；可选删致谢；视频抽轨在独立「视频处理」页。
 
 ## 技术栈
 
@@ -43,9 +43,11 @@ Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `
 6. **黑名单**：仅 `removeCredits == true` 时生效；默认规则用**锚定正则**，防误删对白。  
 7. **双语成品（`\N` 上下中英）**：扫描为 `GroupKind.bilingualFile`（UI：**样式转换**），可转换则拆成双轨写出 `.chs+eng.ass`（保留源）；无法可靠拆分则跳过并汇总。无 `\N` 的单行混排不切开。  
 8. **勾选**：扫描后默认 `selected = true`；合并只处理勾选项（`MergeService.selectedPrefixes`）。  
-9. **抽轨**：中文 chs；外文 eng → 无则 sdh → 再无 Prompt，选择可应用到同文件夹其余视频。跳过 PGS/VobSub。  
+9. **抽轨**：仅「视频处理」页 `MergeService.extractOnly`；中文 chs；外文 eng → 无则 sdh → 再无 Prompt。字幕合并页不抽轨。跳过 PGS/VobSub。  
 10. **输出**：`{displayPrefix}.chs+eng.ass`，默认 PlayRes 1920×1080。写出目录由 `OutputDirMode` 决定：默认 `输入/dual-sub-merged/`（合并时不存在则创建）；可选源文件夹或自定义路径（自定义时快捷勾选变灰）。扫描/抽轨仍用输入目录。  
-11. **拖拽**：`desktop_drop`；目录/字幕/视频 → 设**输入**目录并扫描；`dragAutoRun` 默认 false。  
+11. **拖拽**：输入/输出灰色 `DropTarget` 卡片；输入：目录/字幕/视频并扫描（不自动合并）；输出：仅目录→custom。  
+11b. **界面字体**：`UiFontSettings`（系统族名或字体文件），主题统一 `FontWeight.w400`。  
+11c. **导航**：左侧 `NavigationRail` — 字幕处理 / 视频处理。  
 12. **列表清空**：仅清扫描分组，不重置输入/输出路径设置。  
 13. **标记语言改名**（`tagLanguageOnMerge`，默认 false）：仅无尾部语言标记且角色已识别的中/外源字幕；**移动**到 `chs-sub/`、`eng-sub/`，文件名插入 `.chs`/`.eng`。扫描需包含这两子目录。双语源不改名。提供「仅改名」与「改名并合并」。  
 14. **列表 UI**：每组中在上、外在下；kind 带图标与 ⓘ tooltip（配对 / 样式转换 / 视频）。
@@ -64,8 +66,8 @@ flutter pub get
 flutter test
 flutter analyze
 flutter run -d windows
-.\build_desktop.ps1          # 一键：test + analyze + release
-.\build_desktop.ps1 -SkipTests -Open
+.\build_desktop.ps1          # 一键 release（默认 --no-pub，不测、不 analyze）
+.\build_desktop.ps1 -PubGet -Open
 ```
 
 Windows 产物：`build\windows\x64\runner\Release\dual_sub_merge.exe`（发布带上整个 Release 目录）。

@@ -1,7 +1,12 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
+import '../main.dart';
 import '../models/merge_options.dart';
+import '../services/app_settings.dart';
 import '../services/tools/tool_resolver.dart';
+import '../services/ui_font.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key, required this.options, required this.onChanged});
@@ -18,6 +23,8 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _ffmpeg;
   late final TextEditingController _ffprobe;
   late final TextEditingController _extractDir;
+  late final TextEditingController _fontFamily;
+  UiFontSettings _font = const UiFontSettings();
   String _toolStatus = '';
 
   @override
@@ -27,7 +34,18 @@ class _SettingsPageState extends State<SettingsPage> {
     _ffmpeg = TextEditingController(text: widget.options.ffmpegPath);
     _ffprobe = TextEditingController(text: widget.options.ffprobePath);
     _extractDir = TextEditingController(text: widget.options.extractSubdir);
+    _fontFamily = TextEditingController();
+    _loadFont();
     _detect();
+  }
+
+  Future<void> _loadFont() async {
+    final f = DualSubMergeApp.of(context)?.uiFont ?? await AppSettings.loadUiFont();
+    if (!mounted) return;
+    setState(() {
+      _font = f;
+      _fontFamily.text = f.family;
+    });
   }
 
   @override
@@ -36,6 +54,7 @@ class _SettingsPageState extends State<SettingsPage> {
     _ffmpeg.dispose();
     _ffprobe.dispose();
     _extractDir.dispose();
+    _fontFamily.dispose();
     super.dispose();
   }
 
@@ -55,6 +74,33 @@ class _SettingsPageState extends State<SettingsPage> {
     });
   }
 
+  Future<void> _applyFont(UiFontSettings font) async {
+    final app = DualSubMergeApp.of(context);
+    final messenger = ScaffoldMessenger.of(context);
+    setState(() {
+      _font = font;
+      _fontFamily.text = font.family;
+    });
+    await AppSettings.saveUiFont(font);
+    await app?.applyUiFont(font);
+    if (!mounted) return;
+    messenger.showSnackBar(
+      const SnackBar(content: Text('界面字体已更新')),
+    );
+  }
+
+  Future<void> _pickFontFile() async {
+    final r = await FilePicker.pickFiles(
+      dialogTitle: '选择字体文件',
+      type: FileType.custom,
+      allowedExtensions: const ['ttf', 'otf', 'ttc'],
+    );
+    if (r == null || r.files.isEmpty) return;
+    final path = r.files.single.path;
+    if (path == null || path.isEmpty) return;
+    await _applyFont(_font.copyWith(filePath: path, family: ''));
+  }
+
   void _save() {
     widget.options.mkvToolNixDir = _mkv.text.trim();
     widget.options.ffmpegPath = _ffmpeg.text.trim();
@@ -69,6 +115,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final body = Theme.of(context).textTheme.bodyMedium;
     return Scaffold(
       appBar: AppBar(
         title: const Text('设置'),
@@ -80,6 +127,82 @@ class _SettingsPageState extends State<SettingsPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          Text('界面字体', style: body),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final preset in UiFontSettings.presets)
+                FilterChip(
+                  label: Text(preset.$1),
+                  selected: _font.filePath.isEmpty && _font.family == preset.$2,
+                  onSelected: (_) => _applyFont(
+                    UiFontSettings(family: preset.$2, filePath: ''),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _fontFamily,
+                  decoration: const InputDecoration(
+                    labelText: '系统字体族名',
+                    hintText: '例如 Microsoft YaHei',
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                  onSubmitted: (v) => _applyFont(
+                    UiFontSettings(family: v.trim(), filePath: ''),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton(
+                onPressed: () => _applyFont(
+                  UiFontSettings(family: _fontFamily.text.trim(), filePath: ''),
+                ),
+                child: const Text('应用族名'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  _font.filePath.isEmpty
+                      ? '未选择字体文件'
+                      : '字体文件：${p.basename(_font.filePath)}',
+                  style: body,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              OutlinedButton.icon(
+                onPressed: _pickFontFile,
+                icon: const Icon(Icons.font_download_outlined),
+                label: const Text('选择字体文件'),
+              ),
+              if (_font.filePath.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                TextButton(
+                  onPressed: () => _applyFont(
+                    UiFontSettings(family: _fontFamily.text.trim(), filePath: ''),
+                  ),
+                  child: const Text('清除文件'),
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            '预览：中外字幕合并 dual-sub-merge 0123456789',
+            style: body?.copyWith(fontSize: 16),
+          ),
+          const Divider(height: 32),
           TextField(
             controller: _mkv,
             decoration: const InputDecoration(
@@ -117,12 +240,6 @@ class _SettingsPageState extends State<SettingsPage> {
             title: const Text('覆盖已存在的 .chs+eng.ass'),
             value: widget.options.overwrite,
             onChanged: (v) => setState(() => widget.options.overwrite = v),
-          ),
-          SwitchListTile(
-            title: const Text('拖入后自动开始处理'),
-            subtitle: const Text('关闭时仅扫描并勾选，需手动点「开始合并」'),
-            value: widget.options.dragAutoRun,
-            onChanged: (v) => setState(() => widget.options.dragAutoRun = v),
           ),
           const SizedBox(height: 8),
           OutlinedButton.icon(

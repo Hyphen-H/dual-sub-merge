@@ -76,6 +76,146 @@ class MergeService {
     return selectedPrefixes!.contains(g.prefix);
   }
 
+  /// Extract subtitle tracks from selected video groups only (no merge).
+  Future<MergeResult> extractOnly(Directory dir) async {
+    final logs = <String>[];
+    final outputs = <String>[];
+    var success = 0;
+    var fail = 0;
+
+    final tools = await ToolResolver.resolve(
+      mkvToolNixDir: options.mkvToolNixDir,
+      ffmpegPath: options.ffmpegPath,
+      ffprobePath: options.ffprobePath,
+    );
+    logs.add(
+      '工具: mkvextract=${tools.mkvextract ?? "无"} ffmpeg=${tools.ffmpeg ?? "无"}',
+    );
+
+    var groups = await FileMatcher.scanDirectory(
+      dir,
+      extractSubdir: options.extractSubdir,
+    );
+    if (selectedPrefixes != null) {
+      groups = groups.where(_isSelected).toList();
+    }
+
+    final work = groups.where((g) {
+      if (!_isSelected(g) || g.kind == GroupKind.bilingualFile) return false;
+      if (g.video == null) return false;
+      final needZh = g.chinese == null || g.chinese!.role != TrackRole.chinese;
+      final needEn = g.foreign == null || g.foreign!.role != TrackRole.foreign;
+      return needZh || needEn;
+    }).toList();
+
+    logs.add('待抽轨 ${work.length} 组');
+    if (work.isEmpty) {
+      logs.add('无需要抽轨的视频组');
+      return MergeResult(
+        successCount: 0,
+        failCount: 0,
+        removedCredits: 0,
+        skippedBilingual: const [],
+        convertedBilingual: 0,
+        logs: logs,
+        outputs: outputs,
+      );
+    }
+
+    final extractor = ExtractService(tools, options)..onNeedUserPick = onPickTracks;
+    FolderTrackChoice? folderChoice;
+
+    for (var i = 0; i < work.length; i++) {
+      final g = work[i];
+      final needZh = g.chinese == null || g.chinese!.role != TrackRole.chinese;
+      final needEn = g.foreign == null || g.foreign!.role != TrackRole.foreign;
+
+      onProgress?.call(MergeProgress(
+        current: i + 1,
+        total: work.length,
+        message: '抽取: ${g.outputBase}',
+      ));
+
+      try {
+        extractor.onNeedUserPick = (path, tracks, need) async {
+          if (folderChoice != null) {
+            final auto = TrackSelector.autoSelect(tracks);
+            return SelectedTracks(
+              chinese: folderChoice!.pickChinese?.call(tracks) ?? auto.chinese,
+              foreign: folderChoice!.pickForeign?.call(tracks) ?? auto.foreign,
+            );
+          }
+          final picked = await onPickTracks?.call(path, tracks, need);
+          if (picked != null) {
+            final zhId = picked.chinese?.id;
+            final enId = picked.foreign?.id;
+            folderChoice = FolderTrackChoice()
+              ..pickChinese = zhId == null
+                  ? null
+                  : (ts) {
+                      try {
+                        return ts.firstWhere((t) => t.id == zhId);
+                      } catch (_) {
+                        return TrackSelector.autoSelect(ts).chinese;
+                      }
+                    }
+              ..pickForeign = enId == null
+                  ? null
+                  : (ts) {
+                      try {
+                        return ts.firstWhere((t) => t.id == enId);
+                      } catch (_) {
+                        return TrackSelector.autoSelect(ts).foreign;
+                      }
+                    };
+          }
+          return picked;
+        };
+
+        final result = await extractor.extractForVideo(
+          video: g.video!,
+          need: ExtractNeed(needChinese: needZh, needForeign: needEn),
+          folderChoice: folderChoice,
+        );
+        logs.add('[${g.outputBase}] ${result.log}');
+        var got = false;
+        if (result.chinese != null) {
+          outputs.add(result.chinese!.path);
+          got = true;
+        }
+        if (result.foreign != null) {
+          outputs.add(result.foreign!.path);
+          got = true;
+        }
+        if (got) {
+          success++;
+        } else {
+          fail++;
+        }
+      } catch (e) {
+        fail++;
+        logs.add('[${g.outputBase}] 抽取失败: $e');
+      }
+    }
+
+    onProgress?.call(MergeProgress(
+      current: work.length,
+      total: work.length,
+      message: '抽轨完成',
+      done: true,
+    ));
+
+    return MergeResult(
+      successCount: success,
+      failCount: fail,
+      removedCredits: 0,
+      skippedBilingual: const [],
+      convertedBilingual: 0,
+      logs: logs,
+      outputs: outputs,
+    );
+  }
+
   Future<MergeResult> run(Directory dir, {Directory? outputDir}) async {
     final logs = <String>[];
     final skippedBilingual = <String>[];
@@ -108,95 +248,6 @@ class MergeService {
       groups = groups.where(_isSelected).toList();
     }
     logs.add('待处理 ${groups.length} 组');
-
-    // extract phase (pair / video only)
-    if (options.extractFromVideo) {
-      final extractor = ExtractService(tools, options)..onNeedUserPick = onPickTracks;
-      FolderTrackChoice? folderChoice;
-
-      for (var i = 0; i < groups.length; i++) {
-        final g = groups[i];
-        if (!_isSelected(g) || g.kind == GroupKind.bilingualFile) continue;
-        final needZh = g.chinese == null || g.chinese!.role != TrackRole.chinese;
-        final needEn = g.foreign == null || g.foreign!.role != TrackRole.foreign;
-        if ((!needZh && !needEn) || g.video == null) continue;
-
-        onProgress?.call(MergeProgress(
-          current: i + 1,
-          total: groups.length,
-          message: '抽取: ${g.outputBase}',
-        ));
-
-        try {
-          extractor.onNeedUserPick = (path, tracks, need) async {
-            if (folderChoice != null) {
-              final auto = TrackSelector.autoSelect(tracks);
-              return SelectedTracks(
-                chinese: folderChoice!.pickChinese?.call(tracks) ?? auto.chinese,
-                foreign: folderChoice!.pickForeign?.call(tracks) ?? auto.foreign,
-              );
-            }
-            final picked = await onPickTracks?.call(path, tracks, need);
-            if (picked != null) {
-              final zhId = picked.chinese?.id;
-              final enId = picked.foreign?.id;
-              folderChoice = FolderTrackChoice()
-                ..pickChinese = zhId == null
-                    ? null
-                    : (ts) {
-                        try {
-                          return ts.firstWhere((t) => t.id == zhId);
-                        } catch (_) {
-                          return TrackSelector.autoSelect(ts).chinese;
-                        }
-                      }
-                ..pickForeign = enId == null
-                    ? null
-                    : (ts) {
-                        try {
-                          return ts.firstWhere((t) => t.id == enId);
-                        } catch (_) {
-                          return TrackSelector.autoSelect(ts).foreign;
-                        }
-                      };
-            }
-            return picked;
-          };
-
-          final result = await extractor.extractForVideo(
-            video: g.video!,
-            need: ExtractNeed(needChinese: needZh, needForeign: needEn),
-            folderChoice: folderChoice,
-          );
-          logs.add('[${g.outputBase}] ${result.log}');
-          if (result.chinese != null) {
-            g.chinese = SubtitleFileRef(
-              file: result.chinese!,
-              role: TrackRole.chinese,
-              fromExtract: true,
-            );
-          }
-          if (result.foreign != null) {
-            g.foreign = SubtitleFileRef(
-              file: result.foreign!,
-              role: TrackRole.foreign,
-              fromExtract: true,
-            );
-          }
-          FileMatcher.reevaluate(g);
-        } catch (e) {
-          logs.add('[${g.outputBase}] 抽取失败: $e');
-        }
-      }
-
-      final selectedKeys = groups.map((g) => g.prefix).toSet();
-      groups = (await FileMatcher.scanDirectory(
-        dir,
-        extractSubdir: options.extractSubdir,
-      ))
-          .where((g) => selectedKeys.contains(g.prefix))
-          .toList();
-    }
 
     if (options.tagLanguageOnMerge) {
       onProgress?.call(MergeProgress(

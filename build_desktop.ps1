@@ -1,32 +1,28 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  dual-sub-merge 桌面端一键构建（Windows / 可选 macOS·Linux）
+  dual-sub-merge desktop release build (fast path: skip pub get when possible)
 
 .USAGE
   .\build_desktop.ps1
-  .\build_desktop.ps1 -SkipTests
-  .\build_desktop.ps1 -NoLaunch          # 成功后不提示启动
-  .\build_desktop.ps1 -Open              # 成功后打开输出目录
+  .\build_desktop.ps1 -PubGet
+  .\build_desktop.ps1 -NoLaunch
+  .\build_desktop.ps1 -Open
   .\build_desktop.ps1 -Platform windows
+  .\build_desktop.ps1 -VerboseFlutter
 #>
 param(
   [ValidateSet('windows', 'macos', 'linux')]
   [string]$Platform = 'windows',
-  [switch]$SkipTests,
   [switch]$Open,
   [switch]$NoLaunch,
-  [switch]$VerboseFlutter
+  [switch]$VerboseFlutter,
+  [switch]$PubGet
 )
 
 $ErrorActionPreference = 'Stop'
 $Root = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location -LiteralPath $Root
-
-function Write-Step([string]$msg) {
-  Write-Host ""
-  Write-Host "==> $msg" -ForegroundColor Cyan
-}
 
 function Find-Flutter {
   $cmd = Get-Command flutter -ErrorAction SilentlyContinue
@@ -46,32 +42,71 @@ function Find-Flutter {
   return $null
 }
 
-function Invoke-FlutterQuiet {
-  param([Parameter(Mandatory = $true)][string[]]$FlutterArgs)
+function Test-PubUpToDate {
+  $pkg = Join-Path $Root '.dart_tool\package_config.json'
+  if (-not (Test-Path -LiteralPath $pkg)) { return $false }
 
-  # Hide recurring "N packages have newer versions..." tips (SDK-pinned transitive deps).
+  $pkgTime = (Get-Item -LiteralPath $pkg).LastWriteTimeUtc
+  foreach ($name in @('pubspec.yaml', 'pubspec.lock')) {
+    $f = Join-Path $Root $name
+    if (-not (Test-Path -LiteralPath $f)) { continue }
+    if ((Get-Item -LiteralPath $f).LastWriteTimeUtc -gt $pkgTime) {
+      return $false
+    }
+  }
+  return $true
+}
+
+function Test-FlutterNoiseLine([string]$line) {
   $noise = @(
     'have newer versions incompatible with dependency constraints',
     'Try `flutter pub outdated`',
-    'Try ''flutter pub outdated'''
+    "Try 'flutter pub outdated'",
+    'Resolving dependencies...',
+    'Downloading packages...',
+    'Got dependencies!'
+  )
+  foreach ($n in $noise) {
+    if ($line.Contains($n)) { return $true }
+  }
+  if ($line -match '^\s+\S+\s+\d+\.\d+.*available\)\s*$') { return $true }
+  return $false
+}
+
+function Invoke-Flutter {
+  param(
+    [Parameter(Mandatory = $true)][string[]]$FlutterArgs,
+    [switch]$QuietPubNoise
   )
 
-  & $script:flutter @FlutterArgs 2>&1 | ForEach-Object {
-    $line = "$_"
-    $skip = $false
-    foreach ($n in $noise) {
-      if ($line -like "*$n*") { $skip = $true; break }
+  $prevCi = $env:CI
+  $prevAna = $env:FLUTTER_SUPPRESS_ANALYTICS
+  $env:CI = 'true'
+  $env:FLUTTER_SUPPRESS_ANALYTICS = 'true'
+  try {
+    $oldEap = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    & $script:flutter @FlutterArgs 2>&1 | ForEach-Object {
+      $line = "$_"
+      if ($QuietPubNoise -and (Test-FlutterNoiseLine $line)) { return }
+      if (-not [string]::IsNullOrWhiteSpace($line)) { Write-Host $line }
     }
-    if (-not $skip) { Write-Host $line }
+    $code = if ($null -ne $LASTEXITCODE) { $LASTEXITCODE } else { 0 }
+    $ErrorActionPreference = $oldEap
+  } finally {
+    if ($null -eq $prevCi) { Remove-Item Env:CI -ErrorAction SilentlyContinue } else { $env:CI = $prevCi }
+    if ($null -eq $prevAna) { Remove-Item Env:FLUTTER_SUPPRESS_ANALYTICS -ErrorAction SilentlyContinue } else { $env:FLUTTER_SUPPRESS_ANALYTICS = $prevAna }
   }
 
-  if ($null -eq $LASTEXITCODE) { return }
-  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+  if ($code -ne 0) {
+    Write-Host "flutter failed (exit $code)" -ForegroundColor Red
+    exit $code
+  }
 }
 
 $flutter = Find-Flutter
 if (-not $flutter) {
-  Write-Host "未找到 flutter。请先安装 Flutter 并加入 PATH，或使用 scoop install extras/flutter" -ForegroundColor Red
+  Write-Host "Flutter not found. Install Flutter or: scoop install extras/flutter" -ForegroundColor Red
   exit 1
 }
 
@@ -80,32 +115,24 @@ if ($env:Path -notlike "*$flutterDir*") {
   $env:Path = "$flutterDir;$env:USERPROFILE\scoop\shims;$env:Path"
 }
 
-Write-Host "dual-sub-merge 桌面构建" -ForegroundColor Green
-Write-Host "  Flutter : $flutter"
-Write-Host "  平台    : $Platform"
-Write-Host "  目录    : $Root"
+$env:CI = 'true'
+$env:FLUTTER_SUPPRESS_ANALYTICS = 'true'
 
-Write-Step "flutter --version"
-Invoke-FlutterQuiet -FlutterArgs @('--version')
+Write-Host "dual-sub-merge build ($Platform)" -ForegroundColor Green
 
-Write-Step "flutter pub get"
-Invoke-FlutterQuiet -FlutterArgs @('pub', 'get')
-
-if (-not $SkipTests) {
-  Write-Step "flutter test"
-  Invoke-FlutterQuiet -FlutterArgs @('test')
+$needPub = $PubGet -or -not (Test-PubUpToDate)
+if ($needPub) {
+  Write-Host "==> flutter pub get" -ForegroundColor Cyan
+  Invoke-Flutter -FlutterArgs @('pub', 'get') -QuietPubNoise
 } else {
-  Write-Host "已跳过测试 (-SkipTests)" -ForegroundColor Yellow
+  Write-Host "skip pub get (package_config up to date; use -PubGet to force)" -ForegroundColor DarkGray
 }
 
-Write-Step "flutter analyze"
-Invoke-FlutterQuiet -FlutterArgs @('analyze')
-
-$buildArgs = @('build', $Platform, '--release')
+$buildArgs = @('build', $Platform, '--release', '--no-pub')
 if ($VerboseFlutter) { $buildArgs += '-v' }
 
-Write-Step ("flutter " + ($buildArgs -join ' '))
-Invoke-FlutterQuiet -FlutterArgs $buildArgs
+Write-Host "==> flutter $($buildArgs -join ' ')" -ForegroundColor Cyan
+Invoke-Flutter -FlutterArgs $buildArgs -QuietPubNoise
 
 $outPath = switch ($Platform) {
   'windows' { Join-Path $Root 'build\windows\x64\runner\Release\dual_sub_merge.exe' }
@@ -114,15 +141,15 @@ $outPath = switch ($Platform) {
 }
 
 Write-Host ""
-Write-Host "构建成功" -ForegroundColor Green
+Write-Host "Build OK" -ForegroundColor Green
 if (-not (Test-Path -LiteralPath $outPath)) {
-  Write-Host "  未定位到默认产物路径，请检查 build/ 目录。" -ForegroundColor Yellow
+  Write-Host "  Default output path not found; check build/." -ForegroundColor Yellow
   exit 0
 }
 
-Write-Host "  输出: $outPath" -ForegroundColor Green
+Write-Host "  exe: $outPath" -ForegroundColor Green
 $dir = Split-Path -Parent $outPath
-Write-Host "  目录: $dir"
+Write-Host "  dir: $dir"
 
 if ($Open) {
   if ($IsWindows -or $env:OS -match 'Windows') {
@@ -132,23 +159,21 @@ if ($Open) {
   }
 }
 
-# Default: any key launches the app (Windows exe / macOS open / linux exec)
 if (-not $NoLaunch) {
   Write-Host ""
   if ($Platform -eq 'windows') {
-    Write-Host "按任意键启动 dual_sub_merge.exe ..." -ForegroundColor Yellow
+    Write-Host "Press any key to launch dual_sub_merge.exe ..." -ForegroundColor Yellow
   } else {
-    Write-Host "按任意键启动应用 ..." -ForegroundColor Yellow
+    Write-Host "Press any key to launch ..." -ForegroundColor Yellow
   }
 
   try {
     $null = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
   } catch {
-    # Non-interactive / redirected stdin
-    Read-Host "按 Enter 启动"
+    Read-Host "Press Enter to launch"
   }
 
-  Write-Host "正在启动..." -ForegroundColor Cyan
+  Write-Host "Launching..." -ForegroundColor Cyan
   switch ($Platform) {
     'windows' { Start-Process -FilePath $outPath -WorkingDirectory $dir }
     'macos'   { Start-Process 'open' -ArgumentList $outPath }
