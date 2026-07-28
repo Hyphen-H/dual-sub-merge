@@ -10,7 +10,7 @@ Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `
 ## 技术栈
 
 - Flutter 3 / Dart 3，Material 3，界面中文  
-- 依赖：`file_picker`、`path`、`path_provider`、`shared_preferences`、`collection`  
+- 依赖：`file_picker`、`path`、`path_provider`、`shared_preferences`、`collection`、`desktop_drop`  
 - 字幕解析/写出：**纯 Dart**，不引入重型原生字幕库  
 - 外部进程：`mkvmerge` / `mkvextract`、`ffmpeg` / `ffprobe`（仅抽轨）
 
@@ -30,8 +30,9 @@ Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `
 | `lib/services/file_matcher.dart` | 目录扫描与分组（含 extract / chs-sub / eng-sub） |
 | `lib/services/merge_service.dart` | 端到端编排；尊重 `selectedPrefixes`；可选改名 |
 | `lib/services/extract/` | 容器轨探测与抽取 |
+| `lib/ui/design_system.dart` | `UiTokens`、`AppSurface`、侧栏项、状态徽标等共享壳 |
 | `lib/ui/` | 页面；重逻辑放 services |
-| `test/` | 单测；清洗/黑名单/双语/解析必测 |
+| `test/` | 单测；清洗/黑名单/双语/解析必测；UI 冒烟见 `ui_layout_test.dart` |
 
 ## 业务规则（勿随意改语义）
 
@@ -43,14 +44,15 @@ Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `
 6. **黑名单**：仅 `removeCredits == true` 时生效；默认规则用**锚定正则**，防误删对白。  
 7. **双语成品（`\N` 上下中英）**：扫描为 `GroupKind.bilingualFile`（UI：**样式转换**），可转换则拆成双轨写出 `.chs+eng.ass`（保留源）；无法可靠拆分则跳过并汇总。无 `\N` 的单行混排不切开。  
 8. **勾选**：扫描后默认 `selected = true`；合并只处理勾选项（`MergeService.selectedPrefixes`）。  
-9. **抽轨**：仅「视频处理」页 `MergeService.extractOnly`；中文 chs；外文 eng → 无则 sdh → 再无 Prompt。字幕合并页不抽轨。跳过 PGS/VobSub。  
+9. **抽轨**：仅「视频处理」页 `MergeService.extractOnly`；视频卡片展示全部字幕轨并允许逐轨勾选，初次探测可默认勾选推荐的中文/外文轨。中文输出标记 chs，英文 eng，其他语言保留安全化语言标记，同语言多轨追加轨道号避免覆盖。字幕合并页不抽轨；PGS/VobSub 等图像字幕仅展示且不可勾选。
 10. **输出**：`{displayPrefix}.chs+eng.ass`，默认 PlayRes 1920×1080。写出目录由 `OutputDirMode` 决定：默认 `输入/dual-sub-merged/`（合并时不存在则创建）；可选源文件夹或自定义路径（自定义时快捷勾选变灰）。扫描/抽轨仍用输入目录。  
-11. **拖拽**：输入/输出灰色 `DropTarget` 卡片；输入：目录/字幕/视频并扫描（不自动合并）；输出：仅目录→custom。  
+11. **拖拽**：输入/输出 `DropTarget` 卡片；输入：目录/字幕/视频并扫描（不自动合并）；输出：仅目录→custom。  
 11b. **界面字体**：`UiFontSettings`（系统族名或字体文件），主题统一 `FontWeight.w400`。  
-11c. **导航**：左侧 `NavigationRail` — 字幕处理 / 视频处理。  
+11c. **导航**：自定义侧栏 `SidebarNavItem`（`design_system.dart`）— 字幕处理 / 视频处理；**禁止**对侧栏项使用透明 `Material`+`InkWell`（Windows 易整行纯黑）。选中用 primary 浅填充，悬停约 5% ink，约 120ms `easeOut`；仅 `MouseRegion`+`GestureDetector`。  
+11d. **输出分辨率**：`ResolutionPicker`（`design_system.dart`）精简下拉；触发器/菜单均主档位 + 像素副标（如 1080p / 1920×1080）；菜单自按钮顶向下展开；选中即时写 playRes 并持久化。  
 12. **列表清空**：仅清扫描分组，不重置输入/输出路径设置。  
 13. **标记语言改名**（`tagLanguageOnMerge`，默认 false）：仅无尾部语言标记且角色已识别的中/外源字幕；**移动**到 `chs-sub/`、`eng-sub/`，文件名插入 `.chs`/`.eng`。扫描需包含这两子目录。双语源不改名。提供「仅改名」与「改名并合并」。  
-14. **列表 UI**：每组中在上、外在下；kind 带图标与 ⓘ tooltip（配对 / 样式转换 / 视频）。
+14. **列表 UI**：每组中在上、外在下；kind 带图标与 ⓘ tooltip（配对 / 样式转换 / 视频）。`!statusOk`（字幕）或视频探测失败标 **需检查**（`UiTokens.warning` 黄）；可点「N 项需检查」仅显示问题项；全选作用于当前可见列表。
 
 ## 代码风格
 

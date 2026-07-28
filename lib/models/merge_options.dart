@@ -6,6 +6,8 @@ class ResolutionPreset {
   final int width;
   final int height;
 
+  String get pixelsLabel => '$width×$height';
+
   static const list = [
     ResolutionPreset('720p', 1280, 720),
     ResolutionPreset('1080p', 1920, 1080),
