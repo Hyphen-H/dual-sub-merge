@@ -59,6 +59,7 @@ class MergeService {
     this.onConflict,
     this.onPickTracks,
     this.selectedPrefixes,
+    this.selectedTrackIdsByVideo,
   });
 
   final MergeOptions options;
@@ -68,8 +69,10 @@ class MergeService {
     String videoPath,
     List<SubtitleTrackInfo> tracks,
     ExtractNeed need,
-  )? onPickTracks;
+  )?
+  onPickTracks;
   final Set<String>? selectedPrefixes;
+  final Map<String, Set<int>>? selectedTrackIdsByVideo;
 
   bool _isSelected(MatchGroup g) {
     if (selectedPrefixes == null) return true;
@@ -100,9 +103,13 @@ class MergeService {
       groups = groups.where(_isSelected).toList();
     }
 
+    final explicitTrackSelection = selectedTrackIdsByVideo;
     final work = groups.where((g) {
       if (!_isSelected(g) || g.kind == GroupKind.bilingualFile) return false;
       if (g.video == null) return false;
+      if (explicitTrackSelection != null) {
+        return explicitTrackSelection[g.video!.path]?.isNotEmpty == true;
+      }
       final needZh = g.chinese == null || g.chinese!.role != TrackRole.chinese;
       final needEn = g.foreign == null || g.foreign!.role != TrackRole.foreign;
       return needZh || needEn;
@@ -122,7 +129,8 @@ class MergeService {
       );
     }
 
-    final extractor = ExtractService(tools, options)..onNeedUserPick = onPickTracks;
+    final extractor = ExtractService(tools, options)
+      ..onNeedUserPick = onPickTracks;
     FolderTrackChoice? folderChoice;
 
     for (var i = 0; i < work.length; i++) {
@@ -130,13 +138,36 @@ class MergeService {
       final needZh = g.chinese == null || g.chinese!.role != TrackRole.chinese;
       final needEn = g.foreign == null || g.foreign!.role != TrackRole.foreign;
 
-      onProgress?.call(MergeProgress(
-        current: i + 1,
-        total: work.length,
-        message: '抽取: ${g.outputBase}',
-      ));
+      onProgress?.call(
+        MergeProgress(
+          current: i + 1,
+          total: work.length,
+          message: '抽取: ${g.outputBase}',
+        ),
+      );
 
       try {
+        if (explicitTrackSelection != null) {
+          final selectedIds =
+              explicitTrackSelection[g.video!.path] ?? const <int>{};
+          final tracks = await extractor.probeTracks(g.video!);
+          final selectedTracks = tracks
+              .where((track) => selectedIds.contains(track.id))
+              .toList();
+          final result = await extractor.extractSelectedTracks(
+            video: g.video!,
+            tracks: selectedTracks,
+          );
+          logs.add('[${g.outputBase}] ${result.log}');
+          outputs.addAll(result.files.map((file) => file.path));
+          if (result.files.isEmpty) {
+            fail++;
+          } else {
+            success++;
+          }
+          continue;
+        }
+
         extractor.onNeedUserPick = (path, tracks, need) async {
           if (folderChoice != null) {
             final auto = TrackSelector.autoSelect(tracks);
@@ -198,12 +229,14 @@ class MergeService {
       }
     }
 
-    onProgress?.call(MergeProgress(
-      current: work.length,
-      total: work.length,
-      message: '抽轨完成',
-      done: true,
-    ));
+    onProgress?.call(
+      MergeProgress(
+        current: work.length,
+        total: work.length,
+        message: '抽轨完成',
+        done: true,
+      ),
+    );
 
     return MergeResult(
       successCount: success,
@@ -250,11 +283,9 @@ class MergeService {
     logs.add('待处理 ${groups.length} 组');
 
     if (options.tagLanguageOnMerge) {
-      onProgress?.call(MergeProgress(
-        current: 0,
-        total: groups.length,
-        message: '标记语言改名…',
-      ));
+      onProgress?.call(
+        MergeProgress(current: 0, total: groups.length, message: '标记语言改名…'),
+      );
       final rename = await LanguageTagRenameService().renameGroups(
         inputDir: dir,
         groups: groups,
@@ -282,13 +313,15 @@ class MergeService {
 
     for (var i = 0; i < workList.length; i++) {
       final g = workList[i];
-      onProgress?.call(MergeProgress(
-        current: i + 1,
-        total: workList.length,
-        message: g.kind == GroupKind.bilingualFile
-            ? '转换双语: ${g.outputBase}'
-            : '合并: ${g.outputBase}',
-      ));
+      onProgress?.call(
+        MergeProgress(
+          current: i + 1,
+          total: workList.length,
+          message: g.kind == GroupKind.bilingualFile
+              ? '转换双语: ${g.outputBase}'
+              : '合并: ${g.outputBase}',
+        ),
+      );
 
       // —— bilingual file convert ——
       if (g.kind == GroupKind.bilingualFile && g.bilingualSource != null) {
@@ -402,12 +435,14 @@ class MergeService {
       }
     }
 
-    onProgress?.call(MergeProgress(
-      current: workList.length,
-      total: workList.length,
-      message: '完成',
-      done: true,
-    ));
+    onProgress?.call(
+      MergeProgress(
+        current: workList.length,
+        total: workList.length,
+        message: '完成',
+        done: true,
+      ),
+    );
 
     return MergeResult(
       successCount: success,

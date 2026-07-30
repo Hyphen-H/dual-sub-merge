@@ -300,7 +300,8 @@ class ResolutionPicker extends StatefulWidget {
 
 class _ResolutionPickerState extends State<ResolutionPicker> {
   static const _duration = Duration(milliseconds: 120);
-  static const _ink = Color(0xFF18202F);
+  /// Match Material 3 FilterChip default height.
+  static const _chipHeight = 32.0;
 
   bool _hovered = false;
   bool _pressed = false;
@@ -316,26 +317,19 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
     final primary = scheme.primary;
     if (_menuOpen) {
       if (_pressed) return primary.withValues(alpha: 0.20);
-      if (_hovered) return primary.withValues(alpha: 0.16);
       return primary.withValues(alpha: 0.12);
     }
-    if (_pressed) return _ink.withValues(alpha: 0.08);
-    if (_hovered) return _ink.withValues(alpha: 0.05);
+    // Closed: same mild primary wash as unselected FilterChip hover.
+    if (_pressed) return primary.withValues(alpha: 0.14);
+    if (_hovered) return primary.withValues(alpha: 0.08);
     return scheme.surface;
   }
 
   Color _triggerForeground(ColorScheme scheme, bool enabled) {
     if (!enabled) return Theme.of(context).disabledColor;
     if (_menuOpen) return scheme.primary;
-    if (_hovered || _pressed) return scheme.onSurface;
+    if (_hovered || _pressed) return scheme.primary;
     return scheme.onSurfaceVariant;
-  }
-
-  Color _triggerMuted(ColorScheme scheme, bool enabled) {
-    if (!enabled) return Theme.of(context).disabledColor;
-    if (_menuOpen) return scheme.primary.withValues(alpha: 0.75);
-    if (_hovered || _pressed) return scheme.onSurfaceVariant;
-    return UiTokens.muted;
   }
 
   @override
@@ -364,7 +358,7 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
         shadowColor: const WidgetStatePropertyAll(Color(0x1A18202F)),
         shape: WidgetStatePropertyAll(
           RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(8),
             side: const BorderSide(color: UiTokens.border),
           ),
         ),
@@ -376,7 +370,6 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
       builder: (context, controller, _) {
         final open = _menuOpen || controller.isOpen;
         final fg = _triggerForeground(scheme, enabled);
-        final muted = _triggerMuted(scheme, enabled);
 
         void toggle() {
           if (!enabled) return;
@@ -413,41 +406,27 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
             child: AnimatedContainer(
               duration: _duration,
               curve: Curves.easeOut,
-              height: 40,
-              padding: const EdgeInsets.fromLTRB(10, 0, 8, 0),
+              height: _chipHeight,
+              padding: const EdgeInsets.fromLTRB(8, 0, 4, 0),
               decoration: BoxDecoration(
                 color: _triggerBackground(scheme, enabled),
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(color: UiTokens.border),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.aspect_ratio_rounded, size: 16, color: muted),
-                  const SizedBox(width: 8),
-                  Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        _current.label,
-                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                          color: fg,
-                          fontWeight: FontWeight.w500,
-                          height: 1.15,
-                        ),
-                      ),
-                      Text(
-                        _current.pixelsLabel,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: muted,
-                          height: 1.15,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
+                  Icon(Icons.aspect_ratio_rounded, size: 16, color: fg),
                   const SizedBox(width: 6),
+                  Text(
+                    _current.label,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: fg,
+                      fontWeight: FontWeight.w400,
+                      height: 1.2,
+                    ),
+                  ),
+                  const SizedBox(width: 2),
                   AnimatedRotation(
                     turns: open ? 0.5 : 0,
                     duration: _duration,
@@ -455,7 +434,7 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
                     child: Icon(
                       Icons.expand_more_rounded,
                       size: 18,
-                      color: muted,
+                      color: fg,
                     ),
                   ),
                 ],

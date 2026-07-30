@@ -21,9 +21,9 @@ class DualSubMergeApp extends StatefulWidget {
 }
 
 class DualSubMergeAppState extends State<DualSubMergeApp> {
-  ThemeData _theme = ThemeData(
-    colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF1565C0)),
-    useMaterial3: true,
+  ThemeData _theme = UiFontLoader.buildTheme(
+    ColorScheme.fromSeed(seedColor: const Color(0xFF315FBA)),
+    null,
   );
   UiFontSettings _font = const UiFontSettings();
   var _ready = false;
@@ -42,7 +42,7 @@ class DualSubMergeAppState extends State<DualSubMergeApp> {
 
   Future<void> applyUiFont(UiFontSettings font) async {
     final family = await UiFontLoader.apply(font);
-    final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF1565C0));
+    final scheme = ColorScheme.fromSeed(seedColor: const Color(0xFF315FBA));
     if (!mounted) return;
     setState(() {
       _font = font;
@@ -60,9 +60,7 @@ class DualSubMergeAppState extends State<DualSubMergeApp> {
       theme: _theme,
       home: _ready
           ? const HomePage()
-          : const Scaffold(
-              body: Center(child: CircularProgressIndicator()),
-            ),
+          : const Scaffold(body: Center(child: CircularProgressIndicator())),
     );
   }
 }

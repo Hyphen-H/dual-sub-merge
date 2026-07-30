@@ -49,7 +49,7 @@ Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `
 11. **拖拽**：输入/输出 `DropTarget` 卡片；输入：目录/字幕/视频并扫描（不自动合并）；输出：仅目录→custom。  
 11b. **界面字体**：`UiFontSettings`（系统族名或字体文件），主题统一 `FontWeight.w400`。  
 11c. **导航**：自定义侧栏 `SidebarNavItem`（`design_system.dart`）— 字幕处理 / 视频处理；**禁止**对侧栏项使用透明 `Material`+`InkWell`（Windows 易整行纯黑）。选中用 primary 浅填充，悬停约 5% ink，约 120ms `easeOut`；仅 `MouseRegion`+`GestureDetector`。  
-11d. **输出分辨率**：`ResolutionPicker`（`design_system.dart`）精简下拉；触发器/菜单均主档位 + 像素副标（如 1080p / 1920×1080）；菜单自按钮顶向下展开；选中即时写 playRes 并持久化。  
+11d. **输出分辨率**：`ResolutionPicker`（`design_system.dart`）精简下拉；触发器单行档位（如 1080p）、高度对齐 FilterChip；收起悬停 primary 浅蓝；菜单项可带像素副标，自顶向下展开；选中即时写 playRes 并持久化。  
 12. **列表清空**：仅清扫描分组，不重置输入/输出路径设置。  
 13. **标记语言改名**（`tagLanguageOnMerge`，默认 false）：仅无尾部语言标记且角色已识别的中/外源字幕；**移动**到 `chs-sub/`、`eng-sub/`，文件名插入 `.chs`/`.eng`。扫描需包含这两子目录。双语源不改名。提供「仅改名」与「改名并合并」。  
 14. **列表 UI**：每组中在上、外在下；kind 带图标与 ⓘ tooltip（配对 / 样式转换 / 视频）。`!statusOk`（字幕）或视频探测失败标 **需检查**（`UiTokens.warning` 黄）；可点「N 项需检查」仅显示问题项；全选作用于当前可见列表。

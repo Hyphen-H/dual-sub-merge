@@ -32,7 +32,68 @@ class ExtractService {
     String videoPath,
     List<SubtitleTrackInfo> tracks,
     ExtractNeed need,
-  )? onNeedUserPick;
+  )?
+  onNeedUserPick;
+
+  Future<List<SubtitleTrackInfo>> probeTracks(File video) async {
+    final ext = p.extension(video.path).toLowerCase();
+    if (ext == '.mkv') {
+      if (!tools.hasMkv) {
+        throw Exception('未找到 mkvmerge/mkvextract，请在设置中配置 MKVToolNix');
+      }
+      return MkvProbe.probe(tools.mkvmerge!, video.path);
+    }
+    if (!tools.hasFfmpeg) {
+      throw Exception('未找到 ffmpeg/ffprobe，请安装或在设置中配置');
+    }
+    return FfprobeTracks.probe(tools.ffprobe!, video.path);
+  }
+
+  Future<({List<File> files, String log})> extractSelectedTracks({
+    required File video,
+    required Iterable<SubtitleTrackInfo> tracks,
+  }) async {
+    final selected = tracks.toList();
+    final logs = <String>['已选择 ${selected.length} 条字幕轨'];
+    final files = <File>[];
+    if (selected.isEmpty) return (files: files, log: logs.join('\n'));
+
+    final isMkv = p.extension(video.path).toLowerCase() == '.mkv';
+    if (isMkv && !tools.hasMkv) {
+      throw Exception('未找到 mkvmerge/mkvextract，请在设置中配置 MKVToolNix');
+    }
+    if (!isMkv && !tools.hasFfmpeg) {
+      throw Exception('未找到 ffmpeg/ffprobe，请安装或在设置中配置');
+    }
+
+    final outDir = Directory(
+      p.join(p.dirname(video.path), options.extractSubdir),
+    );
+    await outDir.create(recursive: true);
+    final base = p.basenameWithoutExtension(video.path);
+    final tagCounts = <String, int>{};
+
+    for (final track in selected) {
+      if (track.isBitmap) {
+        logs.add('图像字幕已跳过: ${track.label}');
+        continue;
+      }
+      final tag = _outputTag(track);
+      final count = (tagCounts[tag] ?? 0) + 1;
+      tagCounts[tag] = count;
+      final uniqueTag = count == 1 ? tag : '$tag.track${track.id}';
+      final file = await _extractOne(
+        video: video,
+        track: track,
+        outPath: p.join(outDir.path, '$base.$uniqueTag.extracted'),
+        isMkv: isMkv,
+      );
+      files.add(file);
+      logs.add('抽出: ${p.basename(file.path)} ← ${track.label}');
+    }
+
+    return (files: files, log: logs.join('\n'));
+  }
 
   Future<({File? chinese, File? foreign, String log})> extractForVideo({
     required File video,
@@ -40,21 +101,8 @@ class ExtractService {
     FolderTrackChoice? folderChoice,
   }) async {
     final logs = <String>[];
-    final ext = p.extension(video.path).toLowerCase();
-    List<SubtitleTrackInfo> tracks;
-    final isMkv = ext == '.mkv';
-
-    if (isMkv) {
-      if (!tools.hasMkv) {
-        throw Exception('未找到 mkvmerge/mkvextract，请在设置中配置 MKVToolNix');
-      }
-      tracks = await MkvProbe.probe(tools.mkvmerge!, video.path);
-    } else {
-      if (!tools.hasFfmpeg) {
-        throw Exception('未找到 ffmpeg/ffprobe，请安装或在设置中配置');
-      }
-      tracks = await FfprobeTracks.probe(tools.ffprobe!, video.path);
-    }
+    final isMkv = p.extension(video.path).toLowerCase() == '.mkv';
+    final tracks = await probeTracks(video);
 
     logs.add('发现 ${tracks.length} 条字幕轨');
     var selected = TrackSelector.autoSelect(tracks);
@@ -78,7 +126,9 @@ class ExtractService {
       }
     }
 
-    final outDir = Directory(p.join(p.dirname(video.path), options.extractSubdir));
+    final outDir = Directory(
+      p.join(p.dirname(video.path), options.extractSubdir),
+    );
     await outDir.create(recursive: true);
     final base = p.basenameWithoutExtension(video.path);
 
@@ -116,6 +166,17 @@ class ExtractService {
     return (chinese: zhFile, foreign: enFile, log: logs.join('\n'));
   }
 
+  String _outputTag(SubtitleTrackInfo track) {
+    if (track.isChinese) return 'chs';
+    if (track.isEnglish) return 'eng';
+    final language = track.language.trim().toLowerCase();
+    if (language.isNotEmpty && language != 'und') {
+      final safe = language.replaceAll(RegExp(r'[^a-z0-9-]+'), '-');
+      if (safe.isNotEmpty) return safe;
+    }
+    return 'sub';
+  }
+
   Future<File> _extractOne({
     required File video,
     required SubtitleTrackInfo track,
@@ -143,14 +204,10 @@ class ExtractService {
         throw Exception('mkvextract 失败: ${result.stderr}');
       }
     } else {
-      final map = track.streamIndex != null ? '0:${track.streamIndex}' : '0:s:${track.id}';
-      final args = <String>[
-        '-y',
-        '-i',
-        video.path,
-        '-map',
-        map,
-      ];
+      final map = track.streamIndex != null
+          ? '0:${track.streamIndex}'
+          : '0:s:${track.id}';
+      final args = <String>['-y', '-i', video.path, '-map', map];
       if (ext == '.srt') {
         args.addAll(['-c:s', 'srt']);
       } else {
