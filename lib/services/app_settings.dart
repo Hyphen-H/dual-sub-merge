@@ -18,6 +18,7 @@ class AppSettings {
   static const _kBlacklist = 'blacklistRules';
   static const _kStyles = 'styleLines';
   static const _kLastDir = 'lastDir';
+  static const _kLastVideoDir = 'lastVideoDir';
   static const _kUiFontFamily = 'uiFontFamily';
   static const _kUiFontFile = 'uiFontFilePath';
 
@@ -82,6 +83,16 @@ class AppSettings {
   static Future<void> saveLastDir(String dir) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_kLastDir, dir);
+  }
+
+  static Future<String?> loadLastVideoDir() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getString(_kLastVideoDir);
+  }
+
+  static Future<void> saveLastVideoDir(String dir) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setString(_kLastVideoDir, dir);
   }
 
   static Future<UiFontSettings> loadUiFont() async {

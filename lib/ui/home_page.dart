@@ -31,14 +31,18 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   MergeOptions _options = MergeOptions();
-  String? _dir;
+  String? _subtitleDir;
+  String? _videoDir;
   List<MatchGroup> _groups = [];
   final _log = StringBuffer();
   final Map<String, _VideoTrackState> _videoTrackStates = {};
   bool _busy = false;
-  bool _dragInput = false;
+  bool _dragSubInput = false;
+  bool _dragVideoInput = false;
   bool _dragOutput = false;
   String _progress = '';
+  int _progressCurrent = 0;
+  int _progressTotal = 0;
   bool _logExpanded = false;
   int _resIndex = 1; // 1080p
   bool _showIssuesOnly = false;
@@ -68,26 +72,37 @@ class _HomePageState extends State<HomePage> {
   Future<void> _init() async {
     final opts = await AppSettings.loadOptions();
     final last = await AppSettings.loadLastDir();
+    final lastVideo = await AppSettings.loadLastVideoDir();
     setState(() {
       _options = opts;
-      _dir = last;
+      _subtitleDir = last;
+      _videoDir = lastVideo ?? last;
       _resIndex = ResolutionPreset.list.indexWhere(
         (e) => e.width == opts.playResX && e.height == opts.playResY,
       );
       if (_resIndex < 0) _resIndex = 1;
     });
-    if (last != null && Directory(last).existsSync()) {
+    if ((_subtitleDir != null && Directory(_subtitleDir!).existsSync()) ||
+        (_videoDir != null && Directory(_videoDir!).existsSync())) {
       await _scan();
     }
   }
 
   Future<void> _persist() => AppSettings.saveOptions(_options);
 
-  Future<void> _pickDir() async {
-    final path = await FilePicker.getDirectoryPath(dialogTitle: '选择输入文件夹');
+  Future<void> _pickSubtitleDir() async {
+    final path = await FilePicker.getDirectoryPath(dialogTitle: '选择字幕输入文件夹');
     if (path == null) return;
-    setState(() => _dir = path);
+    setState(() => _subtitleDir = path);
     await AppSettings.saveLastDir(path);
+    await _scan();
+  }
+
+  Future<void> _pickVideoDir() async {
+    final path = await FilePicker.getDirectoryPath(dialogTitle: '选择视频输入文件夹');
+    if (path == null) return;
+    setState(() => _videoDir = path);
+    await AppSettings.saveLastVideoDir(path);
     await _scan();
   }
 
@@ -109,10 +124,10 @@ class _HomePageState extends State<HomePage> {
   String? _resolvedOutputDir() {
     switch (_options.outputDirMode) {
       case OutputDirMode.source:
-        return _dir;
+        return _subtitleDir;
       case OutputDirMode.mergedSubdir:
-        if (_dir == null) return null;
-        return p.join(_dir!, MergeOptions.mergedSubdirName);
+        if (_subtitleDir == null) return null;
+        return p.join(_subtitleDir!, MergeOptions.mergedSubdirName);
       case OutputDirMode.custom:
         final c = _options.customOutputDir.trim();
         return c.isEmpty ? null : c;
@@ -130,7 +145,6 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _scan({bool keepSelection = false}) async {
-    if (_dir == null) return;
     final prevSelected = {for (final g in _groups) g.prefix: g.selected};
     final prevVideoSelections = {
       for (final entry in _videoTrackStates.entries)
@@ -139,13 +153,31 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _busy = true;
       _progress = '扫描中…';
+      _progressCurrent = 0;
+      _progressTotal = 0;
     });
     try {
-      final groups = await FileMatcher.scanDirectory(
-        Directory(_dir!),
-        extractSubdir: _options.extractSubdir,
-      );
-      for (final g in groups) {
+      final all = <MatchGroup>[];
+      if (_subtitleDir != null &&
+          Directory(_subtitleDir!).existsSync()) {
+        all.addAll(
+          await FileMatcher.scanDirectory(
+            Directory(_subtitleDir!),
+            extractSubdir: _options.extractSubdir,
+          ),
+        );
+      }
+      if (_videoDir != null &&
+          _videoDir != _subtitleDir &&
+          Directory(_videoDir!).existsSync()) {
+        all.addAll(
+          await FileMatcher.scanDirectory(
+            Directory(_videoDir!),
+            extractSubdir: _options.extractSubdir,
+          ),
+        );
+      }
+      for (final g in all) {
         // default: all selected; preserve prior choice on refresh
         if (keepSelection && prevSelected.containsKey(g.prefix)) {
           g.selected = prevSelected[g.prefix]!;
@@ -154,12 +186,15 @@ class _HomePageState extends State<HomePage> {
         }
       }
       setState(() {
-        _groups = groups;
+        _groups = all;
         final n = _groups.where((e) => e.selected).length;
-        _log.writeln('扫描 ${_groups.length} 组（默认全选 $n）@ $_dir');
+        _log.writeln(
+          '扫描 ${_groups.length} 组（默认全选 $n）'
+          '@ 字幕=${_subtitleDir ?? "-"} 视频=${_videoDir ?? "-"}',
+        );
       });
       await _loadVideoTracks(
-        groups,
+        all,
         previousSelections: keepSelection ? prevVideoSelections : const {},
       );
     } catch (e) {
@@ -168,6 +203,8 @@ class _HomePageState extends State<HomePage> {
       setState(() {
         _busy = false;
         _progress = '';
+        _progressCurrent = 0;
+        _progressTotal = 0;
       });
     }
   }
@@ -200,6 +237,8 @@ class _HomePageState extends State<HomePage> {
       if (mounted) {
         setState(() {
           _progress = '读取字幕轨：${group.outputBase} (${i + 1}/${videos.length})';
+          _progressCurrent = i + 1;
+          _progressTotal = videos.length;
         });
       }
       try {
@@ -328,10 +367,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _renameOnly() async {
-    if (_dir == null) {
+    if (_subtitleDir == null) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('请先选择输入文件夹')));
+      ).showSnackBar(const SnackBar(content: Text('请先选择字幕输入文件夹')));
       return;
     }
     final selected = _subtitleGroups.where((g) => g.selected).toList();
@@ -344,10 +383,12 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _busy = true;
       _progress = '标记语言改名…';
+      _progressCurrent = 0;
+      _progressTotal = 0;
     });
     try {
       final r = await LanguageTagRenameService().renameGroups(
-        inputDir: Directory(_dir!),
+        inputDir: Directory(_subtitleDir!),
         groups: selected,
         overwrite: _options.overwrite,
       );
@@ -380,16 +421,18 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _busy = false;
           _progress = '';
+          _progressCurrent = 0;
+          _progressTotal = 0;
         });
       }
     }
   }
 
   Future<void> _extractVideos() async {
-    if (_dir == null) {
+    if (_videoDir == null) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('请先选择输入文件夹')));
+      ).showSnackBar(const SnackBar(content: Text('请先选择视频输入文件夹')));
       return;
     }
     final selectedTrackIdsByVideo = <String, Set<int>>{
@@ -417,19 +460,25 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _busy = true;
       _progress = '抽轨中…';
+      _progressCurrent = 0;
+      _progressTotal = selectedTrackIdsByVideo.length;
     });
     final service = MergeService(
       options: _options,
       selectedPrefixes: selected,
       onProgress: (p) {
         if (!mounted) return;
-        setState(() => _progress = '${p.message} (${p.current}/${p.total})');
+        setState(() {
+          _progress = p.message;
+          _progressCurrent = p.current;
+          _progressTotal = p.total;
+        });
       },
       onPickTracks: _pickTracks,
       selectedTrackIdsByVideo: selectedTrackIdsByVideo,
     );
     try {
-      final result = await service.extractOnly(Directory(_dir!));
+      final result = await service.extractOnly(Directory(_videoDir!));
       _log
         ..writeln('—— 视频抽轨 ——')
         ..writeln('成功 ${result.successCount} / 失败 ${result.failCount}')
@@ -461,16 +510,18 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _busy = false;
           _progress = '';
+          _progressCurrent = 0;
+          _progressTotal = 0;
         });
       }
     }
   }
 
   Future<void> _run() async {
-    if (_dir == null) {
+    if (_subtitleDir == null) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('请先选择输入文件夹')));
+      ).showSnackBar(const SnackBar(content: Text('请先选择字幕输入文件夹')));
       return;
     }
     final outPath = _resolvedOutputDir();
@@ -499,6 +550,8 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _busy = true;
       _progress = '处理中…';
+      _progressCurrent = 0;
+      _progressTotal = 0;
     });
 
     final service = MergeService(
@@ -506,14 +559,18 @@ class _HomePageState extends State<HomePage> {
       selectedPrefixes: selected,
       onProgress: (p) {
         if (!mounted) return;
-        setState(() => _progress = '${p.message} (${p.current}/${p.total})');
+        setState(() {
+          _progress = p.message;
+          _progressCurrent = p.current;
+          _progressTotal = p.total;
+        });
       },
       onConflict: _resolveConflict,
     );
 
     try {
       final result = await service.run(
-        Directory(_dir!),
+        Directory(_subtitleDir!),
         outputDir: Directory(outPath),
       );
       _log
@@ -572,6 +629,8 @@ class _HomePageState extends State<HomePage> {
         setState(() {
           _busy = false;
           _progress = '';
+          _progressCurrent = 0;
+          _progressTotal = 0;
         });
       }
     }
@@ -855,7 +914,10 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Future<void> _onDropInput(DropDoneDetails details) async {
+  Future<void> _onDropInput(
+    DropDoneDetails details, {
+    required bool video,
+  }) async {
     if (_busy) return;
     final paths = details.files
         .map((f) => f.path)
@@ -896,10 +958,20 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    setState(() => _dir = workDir!.path);
-    await AppSettings.saveLastDir(workDir.path);
+    setState(() {
+      if (video) {
+        _videoDir = workDir!.path;
+      } else {
+        _subtitleDir = workDir!.path;
+      }
+    });
+    if (video) {
+      await AppSettings.saveLastVideoDir(workDir.path);
+    } else {
+      await AppSettings.saveLastDir(workDir.path);
+    }
     _log.writeln(
-      '拖入输入: ${paths.map(p.basename).join(", ")} → ${modes.toSet().join("+")}',
+      '拖入${video ? "视频" : "字幕"}输入: ${paths.map(p.basename).join(", ")} → ${modes.toSet().join("+")}',
     );
     await _scan();
 
@@ -1260,7 +1332,7 @@ class _HomePageState extends State<HomePage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Text(
-                'v0.2.0',
+                'v0.3.0',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: UiTokens.muted.withValues(alpha: 0.75),
                 ),
@@ -1309,25 +1381,35 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  Widget _buildInputCard({required String hint}) {
+  Widget _buildInputCard({
+    required String hint,
+    required String? dir,
+    required bool video,
+  }) {
     return _pathDropCard(
-      label: '输入来源',
-      pathText: _dir ?? '未选择输入文件夹',
+      label: video ? '视频来源' : '输入来源',
+      pathText: dir ?? (video ? '未选择视频文件夹' : '未选择字幕文件夹'),
       hint: hint,
-      icon: Icons.input_rounded,
-      dragging: _dragInput,
+      icon: video ? Icons.movie_filter_outlined : Icons.input_rounded,
+      dragging: video ? _dragVideoInput : _dragSubInput,
       enabled: true,
-      onDrop: _onDropInput,
-      onDragging: (v) => setState(() => _dragInput = v),
+      onDrop: (d) => _onDropInput(d, video: video),
+      onDragging: (v) => setState(() {
+        if (video) {
+          _dragVideoInput = v;
+        } else {
+          _dragSubInput = v;
+        }
+      }),
       trailing: [
         OutlinedButton.icon(
-          onPressed: _busy ? null : _pickDir,
+          onPressed: _busy ? null : (video ? _pickVideoDir : _pickSubtitleDir),
           icon: const Icon(Icons.folder_open_outlined, size: 17),
           label: const Text('选择'),
         ),
         const SizedBox(width: 8),
         FilledButton.tonalIcon(
-          onPressed: _busy || _dir == null ? null : () => _scan(),
+          onPressed: _busy || dir == null ? null : () => _scan(),
           icon: const Icon(Icons.refresh_rounded, size: 17),
           label: const Text('扫描'),
         ),
@@ -1404,9 +1486,15 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildLogPanel() {
     final hasLog = _log.isNotEmpty;
+    final showBar = _busy && _progressTotal > 0;
+    final progressText = !_busy
+        ? '运行详情'
+        : showBar
+        ? '$_progress ($_progressCurrent/$_progressTotal)'
+        : _progress;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
-      height: _logExpanded ? 176 : 42,
+      height: _logExpanded ? 176 : (showBar ? 46 : 42),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         border: Border.all(color: UiTokens.border),
@@ -1431,9 +1519,13 @@ class _HomePageState extends State<HomePage> {
                           : UiTokens.muted,
                     ),
                     const SizedBox(width: 8),
-                    Text(
-                      _busy ? _progress : '运行详情',
-                      style: Theme.of(context).textTheme.bodyMedium,
+                    Expanded(
+                      child: Text(
+                        progressText,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodyMedium,
+                      ),
                     ),
                     if (!_busy && hasLog) ...[
                       const SizedBox(width: 8),
@@ -1459,6 +1551,15 @@ class _HomePageState extends State<HomePage> {
               ),
             ),
           ),
+          if (showBar)
+            LinearProgressIndicator(
+              value: _progressTotal > 0
+                  ? (_progressCurrent / _progressTotal).clamp(0.0, 1.0)
+                  : null,
+              minHeight: 3,
+              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+              color: Theme.of(context).colorScheme.primary,
+            ),
           if (_logExpanded) ...[
             const Divider(),
             Expanded(
@@ -1806,7 +1907,11 @@ class _HomePageState extends State<HomePage> {
               if (constraints.maxWidth < 1250) {
                 return Column(
                   children: [
-                    _buildInputCard(hint: '支持目录、ASS、SRT、VTT 与视频文件'),
+                    _buildInputCard(
+                      hint: '支持目录、ASS、SRT、VTT 与视频文件',
+                      dir: _subtitleDir,
+                      video: false,
+                    ),
                     const SizedBox(height: 10),
                     _buildOutputCard(),
                   ],
@@ -1815,7 +1920,13 @@ class _HomePageState extends State<HomePage> {
               return Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: _buildInputCard(hint: '目录、字幕或视频')),
+                  Expanded(
+                    child: _buildInputCard(
+                      hint: '目录、字幕或视频',
+                      dir: _subtitleDir,
+                      video: false,
+                    ),
+                  ),
                   const SizedBox(width: 10),
                   Expanded(child: _buildOutputCard()),
                 ],
@@ -1853,7 +1964,11 @@ class _HomePageState extends State<HomePage> {
         const SizedBox(height: 16),
         AppSurface(
           padding: const EdgeInsets.all(12),
-          child: _buildInputCard(hint: '支持拖入含文本字幕轨的 MKV / MP4 或目录'),
+          child: _buildInputCard(
+            hint: '支持拖入含文本字幕轨的 MKV / MP4 或目录',
+            dir: _videoDir,
+            video: true,
+          ),
         ),
         const SizedBox(height: 12),
         AppSurface(

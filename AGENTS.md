@@ -45,8 +45,8 @@ Flutter 桌面应用：把**中文单语字幕 + 外文单语字幕**合并为 `
 7. **双语成品（`\N` 上下中英）**：扫描为 `GroupKind.bilingualFile`（UI：**样式转换**），可转换则拆成双轨写出 `.chs+eng.ass`（保留源）；无法可靠拆分则跳过并汇总。无 `\N` 的单行混排不切开。  
 8. **勾选**：扫描后默认 `selected = true`；合并只处理勾选项（`MergeService.selectedPrefixes`）。  
 9. **抽轨**：仅「视频处理」页 `MergeService.extractOnly`；视频卡片展示全部字幕轨并允许逐轨勾选，初次探测可默认勾选推荐的中文/外文轨。中文输出标记 chs，英文 eng，其他语言保留安全化语言标记，同语言多轨追加轨道号避免覆盖。字幕合并页不抽轨；PGS/VobSub 等图像字幕仅展示且不可勾选。
-10. **输出**：`{displayPrefix}.chs+eng.ass`，默认 PlayRes 1920×1080。写出目录由 `OutputDirMode` 决定：默认 `输入/dual-sub-merged/`（合并时不存在则创建）；可选源文件夹或自定义路径（自定义时快捷勾选变灰）。扫描/抽轨仍用输入目录。  
-11. **拖拽**：输入/输出 `DropTarget` 卡片；输入：目录/字幕/视频并扫描（不自动合并）；输出：仅目录→custom。  
+10. **输出**：`{displayPrefix}.chs+eng.ass`，默认 PlayRes 1920×1080。写出目录由 `OutputDirMode` 决定：默认 `字幕输入/dual-sub-merged/`（合并时不存在则创建）；可选源文件夹或自定义路径（自定义时快捷勾选变灰）。**字幕输入与视频输入各自独立持久化**（`lastDir` / `lastVideoDir`）：字幕处理页用字幕输入目录，视频处理页用视频输入目录，二者互不影响；扫描时合并两组结果。  
+11. **拖拽**：字幕输入 / 视频输入 / 输出 三套 `DropTarget` 卡片；字幕输入：目录/字幕并扫描；视频输入：目录/视频并扫描；输出：仅目录→custom。拖入或选择其一不改变另一个。抽轨时顶部进度条按「视频 (i/total)」+「轨道 #id (a/b)」即时反馈。
 11b. **界面字体**：`UiFontSettings`（系统族名或字体文件），主题统一 `FontWeight.w400`。  
 11c. **导航**：自定义侧栏 `SidebarNavItem`（`design_system.dart`）— 字幕处理 / 视频处理；**禁止**对侧栏项使用透明 `Material`+`InkWell`（Windows 易整行纯黑）。选中用 primary 浅填充，悬停约 5% ink，约 120ms `easeOut`；仅 `MouseRegion`+`GestureDetector`。  
 11d. **输出分辨率**：`ResolutionPicker`（`design_system.dart`）精简下拉；触发器单行档位（如 1080p）、高度对齐 FilterChip；收起悬停 primary 浅蓝；菜单项可带像素副标，自顶向下展开；选中即时写 playRes 并持久化。  

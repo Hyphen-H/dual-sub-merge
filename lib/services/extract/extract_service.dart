@@ -35,6 +35,10 @@ class ExtractService {
   )?
   onNeedUserPick;
 
+  /// Per-track progress during [extractSelectedTracks]: (trackIndex 1-based, total, track).
+  void Function(int trackIndex, int total, SubtitleTrackInfo track)?
+  onTrackProgress;
+
   Future<List<SubtitleTrackInfo>> probeTracks(File video) async {
     final ext = p.extension(video.path).toLowerCase();
     if (ext == '.mkv') {
@@ -72,12 +76,15 @@ class ExtractService {
     await outDir.create(recursive: true);
     final base = p.basenameWithoutExtension(video.path);
     final tagCounts = <String, int>{};
+    var processedTracks = 0;
 
     for (final track in selected) {
       if (track.isBitmap) {
         logs.add('图像字幕已跳过: ${track.label}');
         continue;
       }
+      processedTracks += 1;
+      onTrackProgress?.call(processedTracks, selected.length, track);
       final tag = _outputTag(track);
       final count = (tagCounts[tag] ?? 0) + 1;
       tagCounts[tag] = count;

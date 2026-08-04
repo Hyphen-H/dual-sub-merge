@@ -154,6 +154,17 @@ class MergeService {
           final selectedTracks = tracks
               .where((track) => selectedIds.contains(track.id))
               .toList();
+          extractor.onTrackProgress = (trackIdx, trackTotal, track) {
+            onProgress?.call(
+              MergeProgress(
+                current: i + 1,
+                total: work.length,
+                message:
+                    '抽取 ${g.outputBase} · 轨道 #${track.id}'
+                    ' ($trackIdx/$trackTotal)',
+              ),
+            );
+          };
           final result = await extractor.extractSelectedTracks(
             video: g.video!,
             tracks: selectedTracks,
