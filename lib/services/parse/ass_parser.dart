@@ -1,20 +1,23 @@
-import 'dart:convert';
 import 'dart:io';
 
 import '../../models/ass_style.dart';
 import '../../models/subtitle_cue.dart';
 import 'subtitle_document.dart';
+import 'text_decoder.dart';
 import 'time_util.dart';
 
 class AssParser {
   static Future<SubtitleDocument> parseFile(File file) async {
     final bytes = await file.readAsBytes();
-    final text = _decode(bytes);
+    final text = SubtitleTextDecoder.decode(bytes);
     return parse(text, sourcePath: file.path);
   }
 
   static SubtitleDocument parse(String content, {String sourcePath = ''}) {
-    final lines = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n');
+    final lines = content
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .split('\n');
     final styles = <AssStyle>[];
     final cues = <SubtitleCue>[];
     int? playResX;
@@ -59,18 +62,20 @@ class AssParser {
         final mv = int.tryParse(parts[7].trim()) ?? 0;
         final effect = parts[8].trim();
         final text = parts.sublist(9).join(',');
-        cues.add(SubtitleCue(
-          startMs: start,
-          endMs: end,
-          rawText: text,
-          layer: layer,
-          styleName: styleName,
-          name: name,
-          effect: effect,
-          marginL: ml,
-          marginR: mr,
-          marginV: mv,
-        ));
+        cues.add(
+          SubtitleCue(
+            startMs: start,
+            endMs: end,
+            rawText: text,
+            layer: layer,
+            styleName: styleName,
+            name: name,
+            effect: effect,
+            marginL: ml,
+            marginR: mr,
+            marginV: mv,
+          ),
+        );
       }
     }
     return SubtitleDocument(
@@ -98,19 +103,5 @@ class AssParser {
     }
     out.add(current.toString());
     return out;
-  }
-
-  static String _decode(List<int> bytes) {
-    if (bytes.length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
-      return utf8.decode(bytes.sublist(3), allowMalformed: true);
-    }
-    if (bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
-      return String.fromCharCodes(bytes);
-    }
-    try {
-      return utf8.decode(bytes);
-    } catch (_) {
-      return latin1.decode(bytes, allowInvalid: true);
-    }
   }
 }

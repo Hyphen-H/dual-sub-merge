@@ -21,29 +21,57 @@ class FileMatcher {
   static Future<List<MatchGroup>> scanDirectory(
     Directory dir, {
     String extractSubdir = 'dual-sub-merge-extract',
+  }) => scanDirectories([dir], extractSubdir: extractSubdir);
+
+  static Future<List<MatchGroup>> scanDirectories(
+    Iterable<Directory> dirs, {
+    String extractSubdir = 'dual-sub-merge-extract',
   }) async {
-    final entities = await dir.list(recursive: false).toList();
-    final subFiles = <File>[];
-    for (final e in entities) {
-      if (e is! Directory) continue;
-      final name = p.basename(e.path);
-      if (name == extractSubdir || _extraSubdirs.contains(name)) {
-        subFiles.addAll(
-          await e.list().where((x) => x is File).cast<File>().toList(),
-        );
+    final filesByPath = <String, File>{};
+    for (final dir in dirs) {
+      for (final file in await listDirectoryFiles(
+        dir,
+        extractSubdir: extractSubdir,
+      )) {
+        filesByPath[_pathKey(file.path)] = file;
       }
     }
+    return scanFiles(filesByPath.values, extractSubdir: extractSubdir);
+  }
 
-    final files = [
-      ...entities.whereType<File>(),
-      ...subFiles,
-    ];
+  static Future<List<File>> listDirectoryFiles(
+    Directory dir, {
+    String extractSubdir = 'dual-sub-merge-extract',
+  }) async {
+    if (!dir.existsSync()) return const [];
+    final filesByPath = <String, File>{};
+    final entities = await dir.list(recursive: false).toList();
+    for (final entity in entities.whereType<File>()) {
+      filesByPath[_pathKey(entity.path)] = entity;
+    }
+    for (final entity in entities.whereType<Directory>()) {
+      final name = p.basename(entity.path);
+      if (name != extractSubdir && !_extraSubdirs.contains(name)) continue;
+      await for (final child in entity.list(recursive: false)) {
+        if (child is File) filesByPath[_pathKey(child.path)] = child;
+      }
+    }
+    return filesByPath.values.toList();
+  }
 
+  static Future<List<MatchGroup>> scanFiles(
+    Iterable<File> files, {
+    String extractSubdir = 'dual-sub-merge-extract',
+  }) async {
     final subs = <File>[];
     final videos = <File>[];
-    for (final f in files) {
+    final uniqueFiles = <String, File>{
+      for (final file in files) _pathKey(file.path): file,
+    };
+    for (var f in uniqueFiles.values) {
       final ext = p.extension(f.path).toLowerCase();
       if (SubtitleLoader.exts.contains(ext)) {
+        f = await SubtitleLoader.repairExtractedExtension(f);
         if (f.path.toLowerCase().endsWith('.chs+eng.ass')) continue;
         subs.add(f);
       } else if (_videoExts.contains(ext)) {
@@ -88,7 +116,8 @@ class FileMatcher {
 
     // Bilingual single-file groups (unique prefix per file)
     for (final f in bilingualCandidates) {
-      final prefix = '${LanguageFromName.normalizePrefix(f.path)}::bi::${p.basename(f.path).toLowerCase()}';
+      final prefix =
+          '${LanguageFromName.normalizePrefix(f.path)}::bi::${p.basename(f.path).toLowerCase()}';
       final g = MatchGroup(
         prefix: prefix,
         displayPrefix: LanguageFromName.displayPrefix(f.path),
@@ -103,13 +132,21 @@ class FileMatcher {
 
     for (final v in videos) {
       final prefix = LanguageFromName.normalizePrefix(v.path);
+      final existing = map[prefix];
+      final key =
+          existing?.video != null &&
+              _pathKey(existing!.video!.path) != _pathKey(v.path)
+          ? '$prefix::video::${_pathKey(v.path)}'
+          : prefix;
       final g = map.putIfAbsent(
-        prefix,
-        () => MatchGroup(prefix: prefix, kind: GroupKind.videoOnly),
+        key,
+        () => MatchGroup(prefix: key, kind: GroupKind.videoOnly),
       );
       g.displayPrefix ??= LanguageFromName.displayPrefix(v.path);
       g.video ??= v;
-      if (g.kind != GroupKind.bilingualFile && g.chinese == null && g.foreign == null) {
+      if (g.kind != GroupKind.bilingualFile &&
+          g.chinese == null &&
+          g.foreign == null) {
         g.kind = GroupKind.videoOnly;
       } else if (g.kind != GroupKind.bilingualFile) {
         g.kind = GroupKind.pair;
@@ -122,9 +159,15 @@ class FileMatcher {
     }
 
     final list = map.values.toList()
-      ..sort((a, b) => a.outputBase.toLowerCase().compareTo(b.outputBase.toLowerCase()));
+      ..sort(
+        (a, b) =>
+            a.outputBase.toLowerCase().compareTo(b.outputBase.toLowerCase()),
+      );
     return list;
   }
+
+  static String _pathKey(String path) =>
+      p.normalize(p.absolute(path)).toLowerCase();
 
   static void _assign(MatchGroup g, SubtitleFileRef ref) {
     if (ref.role == TrackRole.chinese) {

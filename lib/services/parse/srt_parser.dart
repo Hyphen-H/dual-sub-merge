@@ -1,18 +1,21 @@
-import 'dart:convert';
 import 'dart:io';
 
 import '../../models/subtitle_cue.dart';
 import 'subtitle_document.dart';
+import 'text_decoder.dart';
 import 'time_util.dart';
 
 class SrtParser {
   static Future<SubtitleDocument> parseFile(File file) async {
     final bytes = await file.readAsBytes();
-    return parse(_decode(bytes), sourcePath: file.path);
+    return parse(SubtitleTextDecoder.decode(bytes), sourcePath: file.path);
   }
 
   static SubtitleDocument parse(String content, {String sourcePath = ''}) {
-    final normalized = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n').trim();
+    final normalized = content
+        .replaceAll('\r\n', '\n')
+        .replaceAll('\r', '\n')
+        .trim();
     final blocks = normalized.split(RegExp(r'\n\s*\n'));
     final cues = <SubtitleCue>[];
     final timeRe = RegExp(
@@ -20,7 +23,10 @@ class SrtParser {
     );
 
     for (final block in blocks) {
-      final lines = block.split('\n').where((e) => e.trim().isNotEmpty).toList();
+      final lines = block
+          .split('\n')
+          .where((e) => e.trim().isNotEmpty)
+          .toList();
       if (lines.isEmpty) continue;
       var idx = 0;
       if (RegExp(r'^\d+$').hasMatch(lines[0].trim())) idx = 1;
@@ -33,16 +39,5 @@ class SrtParser {
       cues.add(SubtitleCue(startMs: start, endMs: end, rawText: text));
     }
     return SubtitleDocument(cues: cues, sourcePath: sourcePath);
-  }
-
-  static String _decode(List<int> bytes) {
-    if (bytes.length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
-      return utf8.decode(bytes.sublist(3), allowMalformed: true);
-    }
-    try {
-      return utf8.decode(bytes);
-    } catch (_) {
-      return latin1.decode(bytes, allowInvalid: true);
-    }
   }
 }

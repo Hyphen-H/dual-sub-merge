@@ -18,7 +18,9 @@ class AppSettings {
   static const _kBlacklist = 'blacklistRules';
   static const _kStyles = 'styleLines';
   static const _kLastDir = 'lastDir';
+  static const _kLastSubtitleFiles = 'lastSubtitleFiles';
   static const _kLastVideoDir = 'lastVideoDir';
+  static const _kLastVideoFiles = 'lastVideoFiles';
   static const _kUiFontFamily = 'uiFontFamily';
   static const _kUiFontFile = 'uiFontFilePath';
 
@@ -85,6 +87,16 @@ class AppSettings {
     await p.setString(_kLastDir, dir);
   }
 
+  static Future<List<String>> loadLastSubtitleFiles() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getStringList(_kLastSubtitleFiles) ?? const [];
+  }
+
+  static Future<void> saveLastSubtitleFiles(Iterable<String> paths) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList(_kLastSubtitleFiles, paths.toList());
+  }
+
   static Future<String?> loadLastVideoDir() async {
     final p = await SharedPreferences.getInstance();
     return p.getString(_kLastVideoDir);
@@ -93,6 +105,16 @@ class AppSettings {
   static Future<void> saveLastVideoDir(String dir) async {
     final p = await SharedPreferences.getInstance();
     await p.setString(_kLastVideoDir, dir);
+  }
+
+  static Future<List<String>> loadLastVideoFiles() async {
+    final p = await SharedPreferences.getInstance();
+    return p.getStringList(_kLastVideoFiles) ?? const [];
+  }
+
+  static Future<void> saveLastVideoFiles(Iterable<String> paths) async {
+    final p = await SharedPreferences.getInstance();
+    await p.setStringList(_kLastVideoFiles, paths.toList());
   }
 
   static Future<UiFontSettings> loadUiFont() async {

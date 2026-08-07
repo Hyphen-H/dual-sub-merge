@@ -1,14 +1,14 @@
-import 'dart:convert';
 import 'dart:io';
 
 import '../../models/subtitle_cue.dart';
 import 'subtitle_document.dart';
+import 'text_decoder.dart';
 import 'time_util.dart';
 
 class VttParser {
   static Future<SubtitleDocument> parseFile(File file) async {
     final bytes = await file.readAsBytes();
-    return parse(_decode(bytes), sourcePath: file.path);
+    return parse(SubtitleTextDecoder.decode(bytes), sourcePath: file.path);
   }
 
   static SubtitleDocument parse(String content, {String sourcePath = ''}) {
@@ -24,7 +24,10 @@ class VttParser {
     );
 
     for (final block in blocks) {
-      final lines = block.split('\n').where((e) => e.trim().isNotEmpty).toList();
+      final lines = block
+          .split('\n')
+          .where((e) => e.trim().isNotEmpty)
+          .toList();
       if (lines.isEmpty) continue;
       var idx = 0;
       if (!timeRe.hasMatch(lines[0]) && lines.length > 1) idx = 1;
@@ -42,16 +45,10 @@ class VttParser {
   static int _parseVtt(String s) {
     final parts = s.trim().split(':');
     if (parts.length == 2) {
-      return TimeUtil.parseSrt('00:${parts[0]}:${parts[1].replaceAll('.', ',')}');
+      return TimeUtil.parseSrt(
+        '00:${parts[0]}:${parts[1].replaceAll('.', ',')}',
+      );
     }
     return TimeUtil.parseSrt(s.replaceAll('.', ','));
-  }
-
-  static String _decode(List<int> bytes) {
-    try {
-      return utf8.decode(bytes);
-    } catch (_) {
-      return latin1.decode(bytes, allowInvalid: true);
-    }
   }
 }

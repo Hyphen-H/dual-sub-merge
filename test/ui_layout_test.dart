@@ -53,7 +53,9 @@ void main() {
     expect(exception, isNull);
   });
 
-  testWidgets('sidebar uses no Material ink and switches pages', (tester) async {
+  testWidgets('sidebar uses no Material ink and switches pages', (
+    tester,
+  ) async {
     await _pumpAt(tester, const HomePage(), const Size(1280, 720));
 
     Finder nav(String label) => find.widgetWithText(SidebarNavItem, label);
@@ -93,25 +95,31 @@ void main() {
     expect(rename.showCheckmark, isFalse);
   });
 
-  testWidgets('long input folder path is not ellipsized', (tester) async {
+  testWidgets('subtitle input offers files or directory', (tester) async {
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    await tester.tap(find.widgetWithText(OutlinedButton, '选择').first);
+    await tester.pumpAndSettle();
+
+    expect(find.text('选择字幕文件'), findsOneWidget);
+    expect(find.text('选择文件夹'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('input folder cache is ignored on app launch', (tester) async {
     const longPath =
         r'C:\Media Library\A Very Long Collection Name\Season 01\Episode Sources\Original Video And Subtitle Assets';
-    SharedPreferences.setMockInitialValues({'lastDir': longPath});
+    SharedPreferences.setMockInitialValues({
+      'lastDir': longPath,
+      'lastVideoDir': longPath,
+    });
     await _pumpAt(tester, const HomePage(), const Size(1024, 640));
 
-    final pathTexts = tester.widgetList<Text>(
-      find.byWidgetPredicate(
-        (widget) =>
-            widget is Text &&
-            (widget.data?.contains('Original Video And Subtitle Assets') ??
-                false),
-      ),
-    );
-    expect(pathTexts, isNotEmpty);
     expect(
-      pathTexts.any((text) => text.maxLines == null && text.overflow == null),
-      isTrue,
+      find.textContaining('Original Video And Subtitle Assets'),
+      findsNothing,
     );
+    expect(find.text('未选择字幕文件夹'), findsOneWidget);
   });
 
   testWidgets('secondary pages lay out at compact desktop size', (

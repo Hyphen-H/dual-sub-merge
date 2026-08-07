@@ -19,12 +19,26 @@ class SubtitleTrackInfo {
   /// absolute stream index for ffmpeg -map 0:N
   final int? streamIndex;
 
+  bool get isAssText {
+    final c = codec.toLowerCase();
+    return c.contains('ass') ||
+        c.contains('ssa') ||
+        c.contains('substationalpha') ||
+        c.contains('substation alpha');
+  }
+
+  String get textFileExtension {
+    final c = codec.toLowerCase();
+    if (isAssText) return '.ass';
+    if (c.contains('vtt') || c.contains('webvtt')) return '.vtt';
+    return '.srt';
+  }
+
   bool get isText {
     final c = codec.toLowerCase();
     return c.contains('subrip') ||
         c.contains('srt') ||
-        c.contains('ass') ||
-        c.contains('ssa') ||
+        isAssText ||
         c.contains('webvtt') ||
         c.contains('mov_text') ||
         c.contains('text') ||

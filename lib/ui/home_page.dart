@@ -33,6 +33,8 @@ class _HomePageState extends State<HomePage> {
   MergeOptions _options = MergeOptions();
   String? _subtitleDir;
   String? _videoDir;
+  Set<String> _subtitleInputFiles = {};
+  Set<String> _videoInputFiles = {};
   List<MatchGroup> _groups = [];
   final _log = StringBuffer();
   final Map<String, _VideoTrackState> _videoTrackStates = {};
@@ -43,9 +45,11 @@ class _HomePageState extends State<HomePage> {
   String _progress = '';
   int _progressCurrent = 0;
   int _progressTotal = 0;
+  double? _progressFraction;
   bool _logExpanded = false;
   int _resIndex = 1; // 1080p
   bool _showIssuesOnly = false;
+
   /// 0 = 字幕处理, 1 = 视频处理
   int _navIndex = 0;
   static final _videoExts = {'.mkv', '.mp4'};
@@ -58,10 +62,20 @@ class _HomePageState extends State<HomePage> {
             g.foreign != null ||
             g.kind == GroupKind.pair,
       )
+      .where(
+        (g) =>
+            _subtitleInputFiles.isEmpty ||
+            _groupTouchesFiles(g, _subtitleInputFiles),
+      )
       .toList();
 
-  List<MatchGroup> get _videoGroups =>
-      _groups.where((g) => g.video != null).toList();
+  List<MatchGroup> get _videoGroups => _groups
+      .where((g) => g.video != null)
+      .where(
+        (g) =>
+            _videoInputFiles.isEmpty || _groupTouchesFiles(g, _videoInputFiles),
+      )
+      .toList();
 
   @override
   void initState() {
@@ -71,21 +85,13 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _init() async {
     final opts = await AppSettings.loadOptions();
-    final last = await AppSettings.loadLastDir();
-    final lastVideo = await AppSettings.loadLastVideoDir();
     setState(() {
       _options = opts;
-      _subtitleDir = last;
-      _videoDir = lastVideo ?? last;
       _resIndex = ResolutionPreset.list.indexWhere(
         (e) => e.width == opts.playResX && e.height == opts.playResY,
       );
       if (_resIndex < 0) _resIndex = 1;
     });
-    if ((_subtitleDir != null && Directory(_subtitleDir!).existsSync()) ||
-        (_videoDir != null && Directory(_videoDir!).existsSync())) {
-      await _scan();
-    }
   }
 
   Future<void> _persist() => AppSettings.saveOptions(_options);
@@ -93,16 +99,72 @@ class _HomePageState extends State<HomePage> {
   Future<void> _pickSubtitleDir() async {
     final path = await FilePicker.getDirectoryPath(dialogTitle: '选择字幕输入文件夹');
     if (path == null) return;
-    setState(() => _subtitleDir = path);
+    setState(() {
+      _subtitleDir = path;
+      _subtitleInputFiles = {};
+    });
     await AppSettings.saveLastDir(path);
+    await AppSettings.saveLastSubtitleFiles(const []);
     await _scan();
+  }
+
+  Future<void> _pickSubtitleFiles() async {
+    final result = await FilePicker.pickFiles(
+      dialogTitle: '选择字幕文件',
+      allowMultiple: true,
+      type: FileType.custom,
+      allowedExtensions: const ['ass', 'ssa', 'srt', 'vtt'],
+    );
+    final paths = result?.paths.whereType<String>().toList() ?? const [];
+    if (paths.isEmpty) return;
+    final dir = p.dirname(paths.first);
+    setState(() {
+      _subtitleDir = dir;
+      _subtitleInputFiles = paths.map(_pathKey).toSet();
+    });
+    await AppSettings.saveLastDir(dir);
+    await AppSettings.saveLastSubtitleFiles(paths);
+    await _scan();
+  }
+
+  Future<void> _pickSubtitleInput() async {
+    final mode = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: const Text('选择字幕输入'),
+        children: [
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'files'),
+            child: const ListTile(
+              leading: Icon(Icons.subtitles_outlined),
+              title: Text('选择字幕文件'),
+              subtitle: Text('支持 ASS、SSA、SRT、VTT，可多选'),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'directory'),
+            child: const ListTile(
+              leading: Icon(Icons.folder_open_outlined),
+              title: Text('选择文件夹'),
+              subtitle: Text('扫描目录及字幕子目录'),
+            ),
+          ),
+        ],
+      ),
+    );
+    if (mode == 'files') await _pickSubtitleFiles();
+    if (mode == 'directory') await _pickSubtitleDir();
   }
 
   Future<void> _pickVideoDir() async {
     final path = await FilePicker.getDirectoryPath(dialogTitle: '选择视频输入文件夹');
     if (path == null) return;
-    setState(() => _videoDir = path);
+    setState(() {
+      _videoDir = path;
+      _videoInputFiles = {};
+    });
     await AppSettings.saveLastVideoDir(path);
+    await AppSettings.saveLastVideoFiles(const []);
     await _scan();
   }
 
@@ -155,28 +217,56 @@ class _HomePageState extends State<HomePage> {
       _progress = '扫描中…';
       _progressCurrent = 0;
       _progressTotal = 0;
+      _progressFraction = null;
     });
     try {
-      final all = <MatchGroup>[];
-      if (_subtitleDir != null &&
+      final filesByPath = <String, File>{};
+      void addFile(File file) => filesByPath[_pathKey(file.path)] = file;
+
+      if (_subtitleInputFiles.isNotEmpty) {
+        for (final path in _subtitleInputFiles) {
+          if (File(path).existsSync()) addFile(File(path));
+        }
+      } else if (_subtitleDir != null &&
           Directory(_subtitleDir!).existsSync()) {
-        all.addAll(
-          await FileMatcher.scanDirectory(
-            Directory(_subtitleDir!),
-            extractSubdir: _options.extractSubdir,
-          ),
+        final files = await FileMatcher.listDirectoryFiles(
+          Directory(_subtitleDir!),
+          extractSubdir: _options.extractSubdir,
         );
+        for (final file in files) {
+          if (SubtitleLoader.exts.contains(
+            p.extension(file.path).toLowerCase(),
+          )) {
+            addFile(file);
+          }
+        }
       }
-      if (_videoDir != null &&
-          _videoDir != _subtitleDir &&
-          Directory(_videoDir!).existsSync()) {
-        all.addAll(
-          await FileMatcher.scanDirectory(
-            Directory(_videoDir!),
-            extractSubdir: _options.extractSubdir,
-          ),
+
+      if (_videoInputFiles.isNotEmpty) {
+        for (final path in _videoInputFiles) {
+          if (File(path).existsSync()) addFile(File(path));
+        }
+      } else if (_videoDir != null && Directory(_videoDir!).existsSync()) {
+        final files = await FileMatcher.listDirectoryFiles(
+          Directory(_videoDir!),
+          extractSubdir: _options.extractSubdir,
         );
+        final sameAsSubtitleDir =
+            _subtitleDir != null &&
+            _pathKey(_subtitleDir!) == _pathKey(_videoDir!);
+        for (final file in files) {
+          final ext = p.extension(file.path).toLowerCase();
+          if (_videoExts.contains(ext) ||
+              (!sameAsSubtitleDir && SubtitleLoader.exts.contains(ext))) {
+            addFile(file);
+          }
+        }
       }
+
+      final all = await FileMatcher.scanFiles(
+        filesByPath.values,
+        extractSubdir: _options.extractSubdir,
+      );
       for (final g in all) {
         // default: all selected; preserve prior choice on refresh
         if (keepSelection && prevSelected.containsKey(g.prefix)) {
@@ -205,6 +295,7 @@ class _HomePageState extends State<HomePage> {
         _progress = '';
         _progressCurrent = 0;
         _progressTotal = 0;
+        _progressFraction = null;
       });
     }
   }
@@ -398,6 +489,7 @@ class _HomePageState extends State<HomePage> {
         ..writeln(
           '完成 ${r.renamedCount}，跳过 ${r.skippedCount}，失败 ${r.failCount}',
         );
+      await _syncExplicitSubtitleFiles(selected);
       await _scan(keepSelection: true);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -429,20 +521,21 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _extractVideos() async {
-    if (_videoDir == null) {
+    if (_videoDir == null && _videoInputFiles.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('请先选择视频输入文件夹')));
+      ).showSnackBar(const SnackBar(content: Text('请先选择或拖入视频')));
       return;
     }
+    final sourceGroups = _videoGroups;
     final selectedTrackIdsByVideo = <String, Set<int>>{
-      for (final group in _videoGroups)
+      for (final group in sourceGroups)
         if (group.video != null && _isVideoGroupSelected(group))
           group.video!.path: Set<int>.from(
             _videoTrackStates[group.video!.path]!.selectedIds,
           ),
     };
-    final selected = _videoGroups
+    final selected = sourceGroups
         .where(
           (group) =>
               group.video != null &&
@@ -462,6 +555,7 @@ class _HomePageState extends State<HomePage> {
       _progress = '抽轨中…';
       _progressCurrent = 0;
       _progressTotal = selectedTrackIdsByVideo.length;
+      _progressFraction = 0;
     });
     final service = MergeService(
       options: _options,
@@ -472,13 +566,17 @@ class _HomePageState extends State<HomePage> {
           _progress = p.message;
           _progressCurrent = p.current;
           _progressTotal = p.total;
+          _progressFraction = p.fraction;
         });
       },
       onPickTracks: _pickTracks,
       selectedTrackIdsByVideo: selectedTrackIdsByVideo,
     );
     try {
-      final result = await service.extractOnly(Directory(_videoDir!));
+      final result = await service.extractOnly(
+        Directory(_videoDir ?? p.dirname(sourceGroups.first.video!.path)),
+        sourceGroups: sourceGroups,
+      );
       _log
         ..writeln('—— 视频抽轨 ——')
         ..writeln('成功 ${result.successCount} / 失败 ${result.failCount}')
@@ -512,6 +610,7 @@ class _HomePageState extends State<HomePage> {
           _progress = '';
           _progressCurrent = 0;
           _progressTotal = 0;
+          _progressFraction = null;
         });
       }
     }
@@ -531,7 +630,8 @@ class _HomePageState extends State<HomePage> {
       ).showSnackBar(const SnackBar(content: Text('请先选择输出文件夹')));
       return;
     }
-    final selected = _subtitleGroups
+    final sourceGroups = _subtitleGroups;
+    final selected = sourceGroups
         .where((g) => g.selected)
         .map((g) => g.prefix)
         .toSet();
@@ -572,6 +672,7 @@ class _HomePageState extends State<HomePage> {
       final result = await service.run(
         Directory(_subtitleDir!),
         outputDir: Directory(outPath),
+        sourceGroups: sourceGroups,
       );
       _log
         ..writeln('—— 完成 ——')
@@ -604,6 +705,9 @@ class _HomePageState extends State<HomePage> {
             ),
           );
         }
+      }
+      if (_options.tagLanguageOnMerge) {
+        await _syncExplicitSubtitleFiles(sourceGroups);
       }
       await _scan(keepSelection: true);
       if (mounted) {
@@ -829,11 +933,7 @@ class _HomePageState extends State<HomePage> {
                           ),
                           const SizedBox(width: 10),
                           Expanded(
-                            child: Text(
-                              p.basename(videoPath),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
+                            child: Text(p.basename(videoPath), softWrap: true),
                           ),
                         ],
                       ),
@@ -926,6 +1026,7 @@ class _HomePageState extends State<HomePage> {
     if (paths.isEmpty) return;
 
     Directory? workDir;
+    var containsDirectory = false;
     final preferFiles = <String>{};
     final modes = <String>[];
 
@@ -933,18 +1034,24 @@ class _HomePageState extends State<HomePage> {
       final type = FileSystemEntity.typeSync(path);
       if (type == FileSystemEntityType.directory) {
         workDir ??= Directory(path);
+        containsDirectory = true;
         modes.add('文件夹');
       } else if (type == FileSystemEntityType.file) {
         final file = File(path);
-        workDir ??= Directory(p.dirname(path));
-        preferFiles.add(p.normalize(file.path).toLowerCase());
         final ext = p.extension(path).toLowerCase();
-        if (SubtitleLoader.exts.contains(ext)) {
+        final accepted = video
+            ? _videoExts.contains(ext)
+            : SubtitleLoader.exts.contains(ext);
+        if (!accepted) {
+          modes.add('不支持的文件');
+          continue;
+        }
+        workDir ??= Directory(p.dirname(path));
+        preferFiles.add(_pathKey(file.path));
+        if (!video) {
           modes.add('字幕');
-        } else if (_videoExts.contains(ext)) {
-          modes.add('视频');
         } else {
-          modes.add('文件');
+          modes.add('视频');
         }
       }
     }
@@ -961,14 +1068,24 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       if (video) {
         _videoDir = workDir!.path;
+        _videoInputFiles = containsDirectory ? {} : preferFiles;
       } else {
         _subtitleDir = workDir!.path;
+        _subtitleInputFiles = containsDirectory
+            ? {}
+            : preferFiles
+                  .where(
+                    (path) => SubtitleLoader.exts.contains(p.extension(path)),
+                  )
+                  .toSet();
       }
     });
     if (video) {
       await AppSettings.saveLastVideoDir(workDir.path);
+      await AppSettings.saveLastVideoFiles(_videoInputFiles);
     } else {
       await AppSettings.saveLastDir(workDir.path);
+      await AppSettings.saveLastSubtitleFiles(_subtitleInputFiles);
     }
     _log.writeln(
       '拖入${video ? "视频" : "字幕"}输入: ${paths.map(p.basename).join(", ")} → ${modes.toSet().join("+")}',
@@ -1134,12 +1251,29 @@ class _HomePageState extends State<HomePage> {
   }
 
   bool _groupTouchesFiles(MatchGroup g, Set<String> preferLower) {
-    bool match(File? f) =>
-        f != null && preferLower.contains(p.normalize(f.path).toLowerCase());
+    bool match(File? f) => f != null && preferLower.contains(_pathKey(f.path));
     return match(g.chinese?.file) ||
         match(g.foreign?.file) ||
         match(g.bilingualSource) ||
         match(g.video);
+  }
+
+  String _pathKey(String path) => p.normalize(p.absolute(path)).toLowerCase();
+
+  Future<void> _syncExplicitSubtitleFiles(Iterable<MatchGroup> groups) async {
+    if (_subtitleInputFiles.isEmpty) return;
+    final paths = <String>{};
+    for (final group in groups) {
+      for (final file in [
+        group.chinese?.file,
+        group.foreign?.file,
+        group.bilingualSource,
+      ]) {
+        if (file != null && file.existsSync()) paths.add(_pathKey(file.path));
+      }
+    }
+    setState(() => _subtitleInputFiles = paths);
+    await AppSettings.saveLastSubtitleFiles(paths);
   }
 
   Future<void> _openStyles() async {
@@ -1195,9 +1329,7 @@ class _HomePageState extends State<HomePage> {
       width: compact ? UiTokens.sidebarCompactWidth : UiTokens.sidebarWidth,
       decoration: BoxDecoration(
         color: scheme.surface,
-        border: const Border(
-          right: BorderSide(color: UiTokens.border),
-        ),
+        border: const Border(right: BorderSide(color: UiTokens.border)),
       ),
       padding: EdgeInsets.fromLTRB(
         compact ? 10 : 12,
@@ -1386,9 +1518,14 @@ class _HomePageState extends State<HomePage> {
     required String? dir,
     required bool video,
   }) {
+    final pathText = video && _videoInputFiles.isNotEmpty
+        ? '已选择 ${_videoInputFiles.length} 个视频文件 · ${dir ?? ""}'
+        : !video && _subtitleInputFiles.isNotEmpty
+        ? '已选择 ${_subtitleInputFiles.length} 个字幕文件 · ${dir ?? ""}'
+        : dir ?? (video ? '未选择视频文件夹' : '未选择字幕文件夹');
     return _pathDropCard(
       label: video ? '视频来源' : '输入来源',
-      pathText: dir ?? (video ? '未选择视频文件夹' : '未选择字幕文件夹'),
+      pathText: pathText,
       hint: hint,
       icon: video ? Icons.movie_filter_outlined : Icons.input_rounded,
       dragging: video ? _dragVideoInput : _dragSubInput,
@@ -1403,7 +1540,9 @@ class _HomePageState extends State<HomePage> {
       }),
       trailing: [
         OutlinedButton.icon(
-          onPressed: _busy ? null : (video ? _pickVideoDir : _pickSubtitleDir),
+          onPressed: _busy
+              ? null
+              : (video ? _pickVideoDir : _pickSubtitleInput),
           icon: const Icon(Icons.folder_open_outlined, size: 17),
           label: const Text('选择'),
         ),
@@ -1490,11 +1629,13 @@ class _HomePageState extends State<HomePage> {
     final progressText = !_busy
         ? '运行详情'
         : showBar
-        ? '$_progress ($_progressCurrent/$_progressTotal)'
+        ? _progressFraction != null
+              ? '$_progress（视频 $_progressCurrent/$_progressTotal）'
+              : '$_progress ($_progressCurrent/$_progressTotal)'
         : _progress;
     return AnimatedContainer(
       duration: const Duration(milliseconds: 180),
-      height: _logExpanded ? 176 : (showBar ? 46 : 42),
+      height: _logExpanded ? 176 : (showBar ? 72 : 42),
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         border: Border.all(color: UiTokens.border),
@@ -1506,7 +1647,7 @@ class _HomePageState extends State<HomePage> {
             borderRadius: BorderRadius.circular(10),
             onTap: () => setState(() => _logExpanded = !_logExpanded),
             child: SizedBox(
-              height: 40,
+              height: showBar ? 66 : 40,
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
@@ -1522,8 +1663,7 @@ class _HomePageState extends State<HomePage> {
                     Expanded(
                       child: Text(
                         progressText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        softWrap: true,
                         style: Theme.of(context).textTheme.bodyMedium,
                       ),
                     ),
@@ -1554,10 +1694,13 @@ class _HomePageState extends State<HomePage> {
           if (showBar)
             LinearProgressIndicator(
               value: _progressTotal > 0
-                  ? (_progressCurrent / _progressTotal).clamp(0.0, 1.0)
+                  ? _progressFraction ??
+                        (_progressCurrent / _progressTotal).clamp(0.0, 1.0)
                   : null,
               minHeight: 3,
-              backgroundColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+              backgroundColor: Theme.of(
+                context,
+              ).colorScheme.surfaceContainerHighest,
               color: Theme.of(context).colorScheme.primary,
             ),
           if (_logExpanded) ...[
@@ -1647,9 +1790,7 @@ class _HomePageState extends State<HomePage> {
                         selectedColor: UiTokens.warningBg,
                         backgroundColor: UiTokens.warningBg,
                         side: BorderSide(
-                          color: filtering
-                              ? UiTokens.warning
-                              : UiTokens.border,
+                          color: filtering ? UiTokens.warning : UiTokens.border,
                         ),
                         onSelected: _busy
                             ? null
@@ -1800,7 +1941,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _setResolutionIndex(int i) async {
-    final res = ResolutionPreset.list[i.clamp(0, ResolutionPreset.list.length - 1)];
+    final res =
+        ResolutionPreset.list[i.clamp(0, ResolutionPreset.list.length - 1)];
     setState(() {
       _resIndex = i;
       _options.playResX = res.width;
@@ -1965,7 +2107,7 @@ class _HomePageState extends State<HomePage> {
         AppSurface(
           padding: const EdgeInsets.all(12),
           child: _buildInputCard(
-            hint: '支持拖入含文本字幕轨的 MKV / MP4 或目录',
+            hint: '支持拖入单个或多个 MKV / MP4，也可拖入目录',
             dir: _videoDir,
             video: true,
           ),
@@ -2193,17 +2335,18 @@ class _GroupTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
-                        Flexible(
-                          child: Text(
-                            g.outputBase,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.titleSmall,
-                          ),
+                        Text(
+                          isVideoMode && g.video != null
+                              ? p.basename(g.video!.path)
+                              : g.outputBase,
+                          softWrap: true,
+                          style: Theme.of(context).textTheme.titleSmall,
                         ),
-                        const SizedBox(width: 8),
                         Tooltip(
                           message: isVideoMode
                               ? '显示容器内全部字幕轨；文本字幕可直接勾选抽取。'
@@ -2236,8 +2379,10 @@ class _GroupTile extends StatelessWidget {
                                   : detailLines[i].$2,
                               child: Text(
                                 detailLines[i].$2,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                                maxLines: isVideoMode ? null : 1,
+                                overflow: isVideoMode
+                                    ? null
+                                    : TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.bodyMedium
                                     ?.copyWith(
                                       color: detailLines[i].$2 == '—'

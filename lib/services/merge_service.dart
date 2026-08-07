@@ -25,11 +25,13 @@ class MergeProgress {
     required this.total,
     required this.message,
     this.done = false,
+    this.fraction,
   });
   final int current;
   final int total;
   final String message;
   final bool done;
+  final double? fraction;
 }
 
 class MergeResult {
@@ -80,7 +82,10 @@ class MergeService {
   }
 
   /// Extract subtitle tracks from selected video groups only (no merge).
-  Future<MergeResult> extractOnly(Directory dir) async {
+  Future<MergeResult> extractOnly(
+    Directory dir, {
+    Iterable<MatchGroup>? sourceGroups,
+  }) async {
     final logs = <String>[];
     final outputs = <String>[];
     var success = 0;
@@ -95,10 +100,12 @@ class MergeService {
       '工具: mkvextract=${tools.mkvextract ?? "无"} ffmpeg=${tools.ffmpeg ?? "无"}',
     );
 
-    var groups = await FileMatcher.scanDirectory(
-      dir,
-      extractSubdir: options.extractSubdir,
-    );
+    var groups =
+        sourceGroups?.toList() ??
+        await FileMatcher.scanDirectory(
+          dir,
+          extractSubdir: options.extractSubdir,
+        );
     if (selectedPrefixes != null) {
       groups = groups.where(_isSelected).toList();
     }
@@ -135,6 +142,7 @@ class MergeService {
 
     for (var i = 0; i < work.length; i++) {
       final g = work[i];
+      final videoName = p.basename(g.video!.path);
       final needZh = g.chinese == null || g.chinese!.role != TrackRole.chinese;
       final needEn = g.foreign == null || g.foreign!.role != TrackRole.foreign;
 
@@ -142,11 +150,38 @@ class MergeService {
         MergeProgress(
           current: i + 1,
           total: work.length,
-          message: '抽取: ${g.outputBase}',
+          message: '抽取: $videoName',
+          fraction: 0,
         ),
       );
 
       try {
+        extractor.onTrackProgress = (trackIdx, trackTotal, track) {
+          onProgress?.call(
+            MergeProgress(
+              current: i + 1,
+              total: work.length,
+              message: '抽取 $videoName · 轨道 #${track.id}',
+              fraction: trackTotal == 0 ? 0 : (trackIdx - 1) / trackTotal,
+            ),
+          );
+        };
+        extractor.onExtractionProgress =
+            (trackIdx, trackTotal, track, trackFraction) {
+              final videoFraction = trackTotal == 0
+                  ? trackFraction
+                  : ((trackIdx - 1) + trackFraction) / trackTotal;
+              onProgress?.call(
+                MergeProgress(
+                  current: i + 1,
+                  total: work.length,
+                  message:
+                      '抽取 $videoName · 轨道 #${track.id} · '
+                      '${(trackFraction * 100).round()}%',
+                  fraction: videoFraction.clamp(0, 1),
+                ),
+              );
+            };
         if (explicitTrackSelection != null) {
           final selectedIds =
               explicitTrackSelection[g.video!.path] ?? const <int>{};
@@ -154,17 +189,6 @@ class MergeService {
           final selectedTracks = tracks
               .where((track) => selectedIds.contains(track.id))
               .toList();
-          extractor.onTrackProgress = (trackIdx, trackTotal, track) {
-            onProgress?.call(
-              MergeProgress(
-                current: i + 1,
-                total: work.length,
-                message:
-                    '抽取 ${g.outputBase} · 轨道 #${track.id}'
-                    ' ($trackIdx/$trackTotal)',
-              ),
-            );
-          };
           final result = await extractor.extractSelectedTracks(
             video: g.video!,
             tracks: selectedTracks,
@@ -246,6 +270,7 @@ class MergeService {
         total: work.length,
         message: '抽轨完成',
         done: true,
+        fraction: 1,
       ),
     );
 
@@ -260,7 +285,11 @@ class MergeService {
     );
   }
 
-  Future<MergeResult> run(Directory dir, {Directory? outputDir}) async {
+  Future<MergeResult> run(
+    Directory dir, {
+    Directory? outputDir,
+    Iterable<MatchGroup>? sourceGroups,
+  }) async {
     final logs = <String>[];
     final skippedBilingual = <String>[];
     final outputs = <String>[];
@@ -284,10 +313,12 @@ class MergeService {
       '工具: mkvextract=${tools.mkvextract ?? "无"} ffmpeg=${tools.ffmpeg ?? "无"}',
     );
 
-    var groups = await FileMatcher.scanDirectory(
-      dir,
-      extractSubdir: options.extractSubdir,
-    );
+    var groups =
+        sourceGroups?.toList() ??
+        await FileMatcher.scanDirectory(
+          dir,
+          extractSubdir: options.extractSubdir,
+        );
     if (selectedPrefixes != null) {
       groups = groups.where(_isSelected).toList();
     }

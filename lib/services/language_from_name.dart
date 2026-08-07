@@ -67,6 +67,12 @@ class LanguageFromName {
 
   static TrackRole fromPath(String path) {
     final base = p.basenameWithoutExtension(path).toLowerCase();
+    final hasChineseMarker = base.contains('chi') || base.contains('chs');
+    final hasEnglishMarker = base.contains('eng');
+    if (hasChineseMarker && !hasEnglishMarker) return TrackRole.chinese;
+    if (hasEnglishMarker && !hasChineseMarker) return TrackRole.foreign;
+    if (hasChineseMarker && hasEnglishMarker) return TrackRole.unknown;
+
     // split on common separators
     final tokens = base
         .split(RegExp(r'[.\s_\-\[\]()]+'))
@@ -86,10 +92,14 @@ class LanguageFromName {
 
     // also check full lower name contains .chs. etc
     final lower = base;
-    if (RegExp(r'(^|[.\s_\-])(chs|cht|zh|cn|chi)([.\s_\-]|$)').hasMatch(lower)) {
+    if (RegExp(
+      r'(^|[.\s_\-])(chs|cht|zh|cn|chi)([.\s_\-]|$)',
+    ).hasMatch(lower)) {
       return TrackRole.chinese;
     }
-    if (RegExp(r'(^|[.\s_\-])(eng|en|sdh|jpn|jp|kor|ko)([.\s_\-]|$)').hasMatch(lower)) {
+    if (RegExp(
+      r'(^|[.\s_\-])(eng|en|sdh|jpn|jp|kor|ko)([.\s_\-]|$)',
+    ).hasMatch(lower)) {
       return TrackRole.foreign;
     }
     return TrackRole.unknown;
@@ -114,23 +124,20 @@ class LanguageFromName {
 
   /// Content majority vote fallback.
   static TrackRole fromContent(Iterable<String> rawTexts, {int sample = 40}) {
-    var zh = 0;
-    var foreign = 0;
+    var han = 0;
+    var latin = 0;
     var n = 0;
     for (final raw in rawTexts) {
       if (n >= sample) break;
       final plain = TextPipeline.plainText(raw);
       if (plain.isEmpty) continue;
       n++;
-      final role = scoreLine(plain);
-      if (role == TrackRole.chinese) {
-        zh++;
-      } else if (role == TrackRole.foreign) {
-        foreign++;
-      }
+      han += RegExp(r'[\u4e00-\u9fff]').allMatches(plain).length;
+      latin += RegExp(r'[A-Za-z]').allMatches(plain).length;
     }
-    if (zh == 0 && foreign == 0) return TrackRole.unknown;
-    if (zh >= foreign) return TrackRole.chinese;
+    if (han == 0 && latin == 0) return TrackRole.unknown;
+    if (han > latin) return TrackRole.chinese;
+    if (latin > han) return TrackRole.foreign;
     return TrackRole.foreign;
   }
 
@@ -155,7 +162,10 @@ class LanguageFromName {
   static String displayPrefix(String path) {
     var base = p.basenameWithoutExtension(path);
     final tokenRe = RegExp(
-      r'[.\s_\-]*(chs|cht|zh|cn|chi|zho|gb|big5|sc|tc|eng|en|en-us|en-gb|english|jpn|jp|jap|kor|ko|fre|fr|ger|de|spa|es|rus|ru|sdh|cc|extracted|简体|繁体|繁中|简中|中字|中文|英文|外挂)+$',
+      // Extracted tracks may be named like `...t4.[eng]` / `...t8.[chi]`.
+      // Consume the optional track number together with the language suffix
+      // so both files normalize to the same pairing prefix.
+      r'[.\s_\-]*(?:t\d+[.\s_\-]*)?[\[\(]?(chs|cht|zh|cn|chi|zho|gb|big5|sc|tc|eng|en|en-us|en-gb|english|jpn|jp|jap|kor|ko|fre|fr|ger|de|spa|es|rus|ru|sdh|cc|extracted|简体|繁体|繁中|简中|中字|中文|英文|外挂)+[\]\)]?$',
       caseSensitive: false,
     );
     var prev = '';
