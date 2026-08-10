@@ -14,6 +14,7 @@ import '../services/extract/track_info.dart';
 import '../services/extract/track_selector.dart';
 import '../services/file_matcher.dart';
 import '../services/language_tag_rename_service.dart';
+import '../services/manual_group_edit.dart';
 import '../services/merge_service.dart';
 import '../services/tools/tool_resolver.dart';
 import '../services/parse/subtitle_loader.dart';
@@ -38,6 +39,9 @@ class _HomePageState extends State<HomePage> {
   List<MatchGroup> _groups = [];
   final _log = StringBuffer();
   final Map<String, _VideoTrackState> _videoTrackStates = {};
+  /// Path-keyed manual overrides retained across rescan (session only).
+  final Map<String, TrackRole> _manualRoles = {};
+  final Map<String, GroupKind> _manualKinds = {};
   bool _busy = false;
   bool _dragSubInput = false;
   bool _dragVideoInput = false;
@@ -267,6 +271,11 @@ class _HomePageState extends State<HomePage> {
         filesByPath.values,
         extractSubdir: _options.extractSubdir,
       );
+      ManualGroupEdit.applyOverrides(
+        all,
+        rolesByPath: _manualRoles,
+        kindByPath: _manualKinds,
+      );
       for (final g in all) {
         // default: all selected; preserve prior choice on refresh
         if (keepSelection && prevSelected.containsKey(g.prefix)) {
@@ -453,8 +462,27 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _groups = [];
       _videoTrackStates.clear();
+      _manualRoles.clear();
+      _manualKinds.clear();
       _showIssuesOnly = false;
     });
+  }
+
+  void _onManualRole(MatchGroup group, String filePath, TrackRole role) {
+    ManualGroupEdit.setFileRole(group, filePath, role);
+    ManualGroupEdit.recordRole(_manualRoles, filePath, role);
+    ManualGroupEdit.syncRolesFromGroup(_manualRoles, group);
+    if (group.kind == GroupKind.pair) {
+      ManualGroupEdit.recordKind(_manualKinds, group, GroupKind.pair);
+    }
+    setState(() {});
+  }
+
+  void _onManualKind(MatchGroup group, GroupKind kind) {
+    ManualGroupEdit.setKind(group, kind);
+    ManualGroupEdit.recordKind(_manualKinds, group, kind);
+    ManualGroupEdit.syncRolesFromGroup(_manualRoles, group);
+    setState(() {});
   }
 
   Future<void> _renameOnly() async {
@@ -1850,6 +1878,8 @@ class _HomePageState extends State<HomePage> {
                             : g.selected,
                         busy: _busy,
                         videoTracks: videoState,
+                        kindManual: !showVideoTracks &&
+                            ManualGroupEdit.hasKindOverride(_manualKinds, g),
                         onSelected: (value) {
                           if (showVideoTracks) {
                             _setVideoGroupSelected(g, value);
@@ -1859,6 +1889,12 @@ class _HomePageState extends State<HomePage> {
                         },
                         onTrackSelected: (track, value) =>
                             _setVideoTrackSelected(g, track, value),
+                        onRoleChanged: showVideoTracks
+                            ? null
+                            : (path, role) => _onManualRole(g, path, role),
+                        onKindChanged: showVideoTracks
+                            ? null
+                            : (kind) => _onManualKind(g, kind),
                       );
                     },
                   ),
@@ -2039,7 +2075,8 @@ class _HomePageState extends State<HomePage> {
       children: [
         const PageHeader(
           title: '字幕处理',
-          description: '配对中外单语字幕，或将上下双语字幕转换为规范的 .chs+eng.ass。',
+          description:
+              '配对中外单语字幕，或将上下双语字幕转换为规范的 .chs+eng.ass。可在列表中手动标记语言与处理方式。',
         ),
         SizedBox(height: compact ? 10 : 16),
         AppSurface(
@@ -2222,6 +2259,9 @@ class _GroupTile extends StatelessWidget {
     required this.onSelected,
     required this.onTrackSelected,
     this.videoTracks,
+    this.kindManual = false,
+    this.onRoleChanged,
+    this.onKindChanged,
   });
 
   final MatchGroup group;
@@ -2230,34 +2270,16 @@ class _GroupTile extends StatelessWidget {
   final ValueChanged<bool> onSelected;
   final void Function(SubtitleTrackInfo track, bool selected) onTrackSelected;
   final _VideoTrackState? videoTracks;
+  final bool kindManual;
+  final void Function(String filePath, TrackRole role)? onRoleChanged;
+  final ValueChanged<GroupKind>? onKindChanged;
 
   @override
   Widget build(BuildContext context) {
     final g = group;
     final scheme = Theme.of(context).colorScheme;
     final isVideoMode = videoTracks != null;
-    final detailLines = <(String, String)>[];
-    if (isVideoMode) {
-      detailLines.add((
-        '视频',
-        g.video == null ? '—' : p.basename(g.video!.path),
-      ));
-    } else if (g.kind == GroupKind.bilingualFile) {
-      detailLines.add((
-        '源',
-        g.bilingualSource == null ? '—' : p.basename(g.bilingualSource!.path),
-      ));
-    } else {
-      detailLines.add((
-        '中',
-        g.chinese == null ? '—' : p.basename(g.chinese!.file.path),
-      ));
-      detailLines.add((
-        '外',
-        g.foreign == null ? '—' : p.basename(g.foreign!.file.path),
-      ));
-      if (g.video != null) detailLines.add(('视频', p.basename(g.video!.path)));
-    }
+    final canEdit = !isVideoMode && !busy && onRoleChanged != null;
 
     final status = isVideoMode
         ? _videoStatus(context)
@@ -2347,53 +2369,62 @@ class _GroupTile extends StatelessWidget {
                           softWrap: true,
                           style: Theme.of(context).textTheme.titleSmall,
                         ),
-                        Tooltip(
-                          message: isVideoMode
-                              ? '显示容器内全部字幕轨；文本字幕可直接勾选抽取。'
-                              : g.kindTooltip,
-                          child: StatusBadge(
-                            label: isVideoMode ? '视频' : g.kindLabel,
-                            foreground: UiTokens.muted,
-                            background: const Color(0xFFF0F3F7),
-                            icon: Icons.info_outline_rounded,
-                          ),
-                        ),
+                        if (isVideoMode)
+                          Tooltip(
+                            message: '显示容器内全部字幕轨；文本字幕可直接勾选抽取。',
+                            child: const StatusBadge(
+                              label: '视频',
+                              foreground: UiTokens.muted,
+                              background: Color(0xFFF0F3F7),
+                              icon: Icons.info_outline_rounded,
+                            ),
+                          )
+                        else
+                          _buildKindChip(context),
                       ],
                     ),
                     const SizedBox(height: 7),
-                    for (var i = 0; i < detailLines.length; i++) ...[
-                      if (i > 0) const SizedBox(height: 3),
-                      Row(
-                        children: [
-                          SizedBox(
-                            width: 34,
-                            child: Text(
-                              detailLines[i].$1,
-                              style: Theme.of(context).textTheme.bodySmall,
-                            ),
-                          ),
-                          Expanded(
-                            child: Tooltip(
-                              message: detailLines[i].$2 == '—'
-                                  ? ''
-                                  : detailLines[i].$2,
-                              child: Text(
-                                detailLines[i].$2,
-                                maxLines: isVideoMode ? null : 1,
-                                overflow: isVideoMode
-                                    ? null
-                                    : TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodyMedium
-                                    ?.copyWith(
-                                      color: detailLines[i].$2 == '—'
-                                          ? UiTokens.warning
-                                          : scheme.onSurfaceVariant,
-                                    ),
-                              ),
-                            ),
-                          ),
-                        ],
+                    if (isVideoMode)
+                      _detailRow(
+                        context,
+                        label: '视频',
+                        name: g.video == null ? '—' : p.basename(g.video!.path),
+                      )
+                    else if (g.kind == GroupKind.bilingualFile)
+                      _subtitleSlotRow(
+                        context,
+                        label: '源',
+                        file: g.bilingualSource,
+                        role: TrackRole.unknown,
+                        canEdit: canEdit,
+                        allowRoleEdit: false,
+                      )
+                    else ...[
+                      _subtitleSlotRow(
+                        context,
+                        label: '中',
+                        file: g.chinese?.file,
+                        role: g.chinese?.role ?? TrackRole.unknown,
+                        canEdit: canEdit && g.chinese != null,
+                        allowRoleEdit: true,
                       ),
+                      const SizedBox(height: 3),
+                      _subtitleSlotRow(
+                        context,
+                        label: '外',
+                        file: g.foreign?.file,
+                        role: g.foreign?.role ?? TrackRole.unknown,
+                        canEdit: canEdit && g.foreign != null,
+                        allowRoleEdit: true,
+                      ),
+                      if (g.video != null) ...[
+                        const SizedBox(height: 3),
+                        _detailRow(
+                          context,
+                          label: '视频',
+                          name: p.basename(g.video!.path),
+                        ),
+                      ],
                     ],
                     if (isVideoMode) ...[
                       const SizedBox(height: 10),
@@ -2429,6 +2460,128 @@ class _GroupTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildKindChip(BuildContext context) {
+    final g = group;
+    final scheme = Theme.of(context).colorScheme;
+    final canSwitch =
+        !busy &&
+        onKindChanged != null &&
+        (g.kind == GroupKind.pair || g.kind == GroupKind.bilingualFile);
+    final label = kindManual ? '${g.kindLabel}·手动' : g.kindLabel;
+    final chip = StatusBadge(
+      label: label,
+      foreground: kindManual ? scheme.primary : UiTokens.muted,
+      background: kindManual
+          ? scheme.primaryContainer.withValues(alpha: 0.55)
+          : const Color(0xFFF0F3F7),
+      icon: canSwitch ? Icons.swap_horiz_rounded : Icons.info_outline_rounded,
+    );
+    if (!canSwitch) {
+      return Tooltip(message: g.kindTooltip, child: chip);
+    }
+    return PopupMenuButton<GroupKind>(
+      tooltip: '${g.kindTooltip}\n点击切换处理方式',
+      enabled: !busy,
+      onSelected: onKindChanged,
+      itemBuilder: (context) => [
+        CheckedPopupMenuItem(
+          value: GroupKind.pair,
+          checked: g.kind == GroupKind.pair,
+          child: const Text('配对'),
+        ),
+        CheckedPopupMenuItem(
+          value: GroupKind.bilingualFile,
+          checked: g.kind == GroupKind.bilingualFile,
+          child: const Text('样式转换'),
+        ),
+      ],
+      child: chip,
+    );
+  }
+
+  Widget _detailRow(
+    BuildContext context, {
+    required String label,
+    required String name,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      children: [
+        SizedBox(
+          width: 34,
+          child: Text(label, style: Theme.of(context).textTheme.bodySmall),
+        ),
+        Expanded(
+          child: Tooltip(
+            message: name == '—' ? '' : name,
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: name == '—' ? UiTokens.warning : scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _subtitleSlotRow(
+    BuildContext context, {
+    required String label,
+    required File? file,
+    required TrackRole role,
+    required bool canEdit,
+    required bool allowRoleEdit,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final name = file == null ? '—' : p.basename(file.path);
+    final labelStyle = Theme.of(context).textTheme.bodySmall?.copyWith(
+      color: canEdit && allowRoleEdit ? scheme.primary : null,
+      decoration: canEdit && allowRoleEdit ? TextDecoration.underline : null,
+      decorationColor: scheme.primary.withValues(alpha: 0.45),
+    );
+
+    Widget labelWidget = Text(label, style: labelStyle);
+    if (canEdit && allowRoleEdit && file != null && onRoleChanged != null) {
+      labelWidget = PopupMenuButton<TrackRole>(
+        tooltip: '标记语言：${role.label}',
+        enabled: !busy,
+        onSelected: (value) => onRoleChanged!(file.path, value),
+        itemBuilder: (context) => [
+          for (final r in TrackRole.values)
+            CheckedPopupMenuItem(
+              value: r,
+              checked: role == r,
+              child: Text(r.label),
+            ),
+        ],
+        child: labelWidget,
+      );
+    }
+
+    return Row(
+      children: [
+        SizedBox(width: 34, child: labelWidget),
+        Expanded(
+          child: Tooltip(
+            message: name == '—' ? '' : name,
+            child: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: name == '—' ? UiTokens.warning : scheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
