@@ -59,14 +59,109 @@ class SubtitleTrackInfo {
     return t.contains('sdh') || t.contains('hearing') || RegExp(r'\bcc\b').hasMatch(t);
   }
 
+  String get _langNorm => language.trim().toLowerCase().replaceAll('_', '-');
+
   bool get isChinese {
-    final lang = language.toLowerCase();
-    final t = title.toLowerCase();
-    if ({'chi', 'zho', 'zh', 'chs', 'cht', 'zh-cn', 'zh-tw', 'zh-hans', 'zh-hant'}.contains(lang)) {
+    final lang = _langNorm;
+    if (_chineseLangCodes.contains(lang) ||
+        lang.startsWith('zh-hans') ||
+        lang.startsWith('zh-hant') ||
+        lang.startsWith('zh-cn') ||
+        lang.startsWith('zh-sg') ||
+        lang.startsWith('zh-tw') ||
+        lang.startsWith('zh-hk') ||
+        lang.startsWith('zh-mo')) {
       return true;
     }
-    return RegExp(r'简|繁|中文|chs|cht|chinese|中字').hasMatch(t);
+    return RegExp(
+      r'简|簡|繁|中文|chs|cht|chinese|中字',
+      caseSensitive: false,
+    ).hasMatch(title);
   }
+
+  bool get isSimplifiedChinese {
+    if (_scriptFromLanguage == _ChineseScript.simplified) return true;
+    if (_scriptFromLanguage == _ChineseScript.traditional) return false;
+    return _scriptFromTitle == _ChineseScript.simplified;
+  }
+
+  bool get isTraditionalChinese {
+    if (_scriptFromLanguage == _ChineseScript.traditional) return true;
+    if (_scriptFromLanguage == _ChineseScript.simplified) return false;
+    return _scriptFromTitle == _ChineseScript.traditional;
+  }
+
+  _ChineseScript? get _scriptFromLanguage {
+    final lang = _langNorm;
+    if (_simplifiedLangCodes.contains(lang) ||
+        lang.startsWith('zh-hans') ||
+        lang.startsWith('zh-cn') ||
+        lang.startsWith('zh-sg')) {
+      return _ChineseScript.simplified;
+    }
+    if (_traditionalLangCodes.contains(lang) ||
+        lang.startsWith('zh-hant') ||
+        lang.startsWith('zh-tw') ||
+        lang.startsWith('zh-hk') ||
+        lang.startsWith('zh-mo')) {
+      return _ChineseScript.traditional;
+    }
+    return null;
+  }
+
+  _ChineseScript? get _scriptFromTitle {
+    final simplified = RegExp(
+      r'简|簡|chs|simplified',
+      caseSensitive: false,
+    ).hasMatch(title);
+    final traditional = RegExp(
+      r'繁|正體|正体|cht|big5|traditional',
+      caseSensitive: false,
+    ).hasMatch(title);
+    if (simplified && !traditional) return _ChineseScript.simplified;
+    if (traditional && !simplified) return _ChineseScript.traditional;
+    return null;
+  }
+
+  static const _chineseLangCodes = {
+    'chi',
+    'zho',
+    'zh',
+    'chs',
+    'cht',
+    'zhs',
+    'zht',
+    'sc',
+    'tc',
+    'big5',
+    'zh-cn',
+    'zh-sg',
+    'zh-tw',
+    'zh-hk',
+    'zh-mo',
+    'zh-hans',
+    'zh-hant',
+  };
+
+  static const _simplifiedLangCodes = {
+    'chs',
+    'sc',
+    'zhs',
+    'zh-cn',
+    'zh-hans',
+    'zh-sg',
+  };
+
+  static const _traditionalLangCodes = {
+    'cht',
+    'tc',
+    'zht',
+    'big5',
+    'zh-tw',
+    'zh-hk',
+    'zh-hant',
+    'zh-mo',
+  };
 
   bool get isEnglish {
     final lang = language.toLowerCase();
@@ -91,3 +186,5 @@ class SubtitleTrackInfo {
     return parts.join(' | ');
   }
 }
+
+enum _ChineseScript { simplified, traditional }

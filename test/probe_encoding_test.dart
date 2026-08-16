@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dual_sub_merge/services/extract/ffprobe_tracks.dart';
 import 'package:dual_sub_merge/services/extract/mkv_probe.dart';
 import 'package:dual_sub_merge/services/extract/track_info.dart';
+import 'package:dual_sub_merge/services/extract/track_selector.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -53,5 +54,121 @@ void main() {
 
     expect(track.isText, isTrue);
     expect(track.textFileExtension, '.ass');
+  });
+
+  test('mkv probe prefers IETF script when language is chi', () {
+    final output = jsonEncode({
+      'tracks': [
+        {
+          'id': 3,
+          'type': 'subtitles',
+          'properties': {
+            'codec_id': 'S_TEXT/UTF8',
+            'language': 'chi',
+            'language_ietf': 'zh-Hant',
+            'track_name': '繁體中文',
+            'default_track': true,
+          },
+        },
+        {
+          'id': 4,
+          'type': 'subtitles',
+          'properties': {
+            'codec_id': 'S_TEXT/UTF8',
+            'language': 'chi',
+            'language_ietf': 'zh-Hans',
+            'track_name': '简体中文',
+            'default_track': false,
+          },
+        },
+      ],
+    });
+
+    final tracks = MkvProbe.parse(output);
+    expect(tracks[0].language, 'zh-Hant');
+    expect(tracks[0].isTraditionalChinese, isTrue);
+    expect(tracks[1].language, 'zh-Hans');
+    expect(tracks[1].isSimplifiedChinese, isTrue);
+  });
+
+  test('title 简体 is simplified and 繁體 is traditional', () {
+    final simplified = SubtitleTrackInfo(
+      id: 1,
+      codec: 'S_TEXT/UTF8',
+      language: 'chi',
+      title: '简体中文',
+    );
+    final traditional = SubtitleTrackInfo(
+      id: 2,
+      codec: 'S_TEXT/UTF8',
+      language: 'chi',
+      title: '繁體中文',
+      isDefault: true,
+    );
+    final unmarked = SubtitleTrackInfo(
+      id: 3,
+      codec: 'S_TEXT/UTF8',
+      language: 'chi',
+      title: '中文',
+    );
+
+    expect(simplified.isSimplifiedChinese, isTrue);
+    expect(simplified.isTraditionalChinese, isFalse);
+    expect(traditional.isTraditionalChinese, isTrue);
+    expect(traditional.isSimplifiedChinese, isFalse);
+    expect(unmarked.isChinese, isTrue);
+    expect(unmarked.isSimplifiedChinese, isFalse);
+    expect(unmarked.isTraditionalChinese, isFalse);
+  });
+
+  test('autoSelect prefers simplified over default traditional', () {
+    final selected = TrackSelector.autoSelect([
+      SubtitleTrackInfo(
+        id: 3,
+        codec: 'S_TEXT/UTF8',
+        language: 'chi',
+        title: '繁體中文',
+        isDefault: true,
+      ),
+      SubtitleTrackInfo(
+        id: 4,
+        codec: 'S_TEXT/UTF8',
+        language: 'chi',
+        title: '简体中文',
+      ),
+      SubtitleTrackInfo(id: 5, codec: 'S_TEXT/UTF8', language: 'eng'),
+    ]);
+
+    expect(selected.chinese?.id, 4);
+    expect(selected.foreign?.id, 5);
+  });
+
+  test('autoSelect falls back to unmarked then traditional', () {
+    final unmarkedOnly = TrackSelector.autoSelect([
+      SubtitleTrackInfo(
+        id: 2,
+        codec: 'S_TEXT/UTF8',
+        language: 'cht',
+        title: '繁體中文',
+        isDefault: true,
+      ),
+      SubtitleTrackInfo(
+        id: 3,
+        codec: 'S_TEXT/UTF8',
+        language: 'chi',
+        title: '中文',
+      ),
+    ]);
+    expect(unmarkedOnly.chinese?.id, 3);
+
+    final traditionalOnly = TrackSelector.autoSelect([
+      SubtitleTrackInfo(
+        id: 2,
+        codec: 'S_TEXT/UTF8',
+        language: 'cht',
+        title: '繁體中文',
+      ),
+    ]);
+    expect(traditionalOnly.chinese?.id, 2);
   });
 }

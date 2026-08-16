@@ -30,8 +30,7 @@ class MkvProbe {
         SubtitleTrackInfo(
           id: map['id'] as int,
           codec: (props['codec_id'] ?? map['codec'] ?? '').toString(),
-          language: (props['language'] ?? props['language_ietf'] ?? '')
-              .toString(),
+          language: _trackLanguage(props),
           title: (props['track_name'] ?? '').toString(),
           isDefault: props['default_track'] == true,
           isForced: props['forced_track'] == true,
@@ -39,5 +38,15 @@ class MkvProbe {
       );
     }
     return out;
+  }
+
+  static String _trackLanguage(Map<String, dynamic> props) {
+    final lang = (props['language'] ?? '').toString();
+    final ietf = (props['language_ietf'] ?? '').toString();
+    final generic = {'', 'chi', 'zho', 'zh', 'und'};
+    if (generic.contains(lang.toLowerCase()) && ietf.isNotEmpty) {
+      return ietf;
+    }
+    return lang.isNotEmpty ? lang : ietf;
   }
 }

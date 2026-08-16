@@ -10,7 +10,19 @@ class TrackSelector {
   /// Auto pick chs + eng (fallback sdh for foreign).
   static SelectedTracks autoSelect(List<SubtitleTrackInfo> tracks) {
     final text = tracks.where((t) => !t.isBitmap && !t.isCommentary).toList();
-    final chinese = _best(text.where((t) => t.isChinese).toList());
+    final chinese =
+        _best(text.where((t) => t.isSimplifiedChinese).toList()) ??
+        _best(
+          text
+              .where(
+                (t) =>
+                    t.isChinese &&
+                    !t.isSimplifiedChinese &&
+                    !t.isTraditionalChinese,
+              )
+              .toList(),
+        ) ??
+        _best(text.where((t) => t.isTraditionalChinese).toList());
     var foreign = _best(text.where((t) => t.isEnglish && !t.isSdh).toList());
     foreign ??= _best(text.where((t) => t.isEnglish).toList());
     foreign ??= _best(text.where((t) => t.isSdh).toList());

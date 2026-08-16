@@ -1492,7 +1492,7 @@ class _HomePageState extends State<HomePage> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Text(
-                'v0.3.0',
+                'v0.4.2',
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: UiTokens.muted.withValues(alpha: 0.75),
                 ),
