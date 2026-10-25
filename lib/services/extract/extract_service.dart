@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../../models/merge_options.dart';
+import '../language_from_name.dart';
 import '../parse/subtitle_loader.dart';
 import '../tools/tool_resolver.dart';
 import 'ffprobe_tracks.dart';
@@ -130,7 +131,10 @@ class ExtractService {
     final tracks = await probeTracks(video);
 
     logs.add('发现 ${tracks.length} 条字幕轨');
-    var selected = TrackSelector.autoSelect(tracks);
+    var selected = TrackSelector.autoSelect(
+      tracks,
+      mode: options.extractPairMode,
+    );
 
     if (folderChoice?.pickChinese != null) {
       selected.chinese = folderChoice!.pickChinese!(tracks) ?? selected.chinese;
@@ -159,6 +163,11 @@ class ExtractService {
 
     File? zhFile;
     File? enFile;
+    final foreignTag = selected.foreign == null
+        ? 'eng'
+        : selected.foreign!.isJapanese
+        ? 'jpn'
+        : LanguageFromName.foreignOutputTag(selected.foreign!.language);
     final pending = <({SubtitleTrackInfo track, String role, String outPath})>[
       if (need.needChinese &&
           selected.chinese != null &&
@@ -174,7 +183,7 @@ class ExtractService {
         (
           track: selected.foreign!,
           role: '外文',
-          outPath: p.join(outDir.path, '$base.eng.extracted'),
+          outPath: p.join(outDir.path, '$base.$foreignTag.extracted'),
         ),
     ];
     final duration = isMkv || pending.isEmpty
@@ -214,7 +223,7 @@ class ExtractService {
         enFile = await _extractOne(
           video: video,
           track: selected.foreign!,
-          outPath: p.join(outDir.path, '$base.eng.extracted'),
+          outPath: p.join(outDir.path, '$base.$foreignTag.extracted'),
           isMkv: isMkv,
           duration: duration,
           onProgress: (fraction) => onExtractionProgress?.call(
@@ -234,8 +243,11 @@ class ExtractService {
   String _outputTag(SubtitleTrackInfo track) {
     if (track.isChinese) return 'chs';
     if (track.isEnglish) return 'eng';
+    if (track.isJapanese) return 'jpn';
     final language = track.language.trim().toLowerCase();
     if (language.isNotEmpty && language != 'und') {
+      final known = LanguageFromName.foreignOutputTag(language, fallback: '');
+      if (known.isNotEmpty) return known;
       final safe = language.replaceAll(RegExp(r'[^a-z0-9-]+'), '-');
       if (safe.isNotEmpty) return safe;
     }

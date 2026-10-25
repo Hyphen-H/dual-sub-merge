@@ -182,12 +182,8 @@ void main() {
         LanguageFromName.normalizePrefix('Show.S02E01.eng.srt'),
       );
       expect(
-        LanguageFromName.normalizePrefix(
-          'Slow.Horses.S05E05.t4.[eng].srt',
-        ),
-        LanguageFromName.normalizePrefix(
-          'Slow.Horses.S05E05.t8.[chi].srt',
-        ),
+        LanguageFromName.normalizePrefix('Slow.Horses.S05E05.t4.[eng].srt'),
+        LanguageFromName.normalizePrefix('Slow.Horses.S05E05.t8.[chi].srt'),
       );
     });
   });
@@ -343,6 +339,110 @@ Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello, world
       expect(doc.cues.length, 1);
       expect(doc.cues.first.rawText, 'Hello, world');
       expect(doc.playResX, 1920);
+    });
+  });
+
+  group('Japanese (kana) recognition', () {
+    test('kana-heavy lines score as foreign', () {
+      expect(LanguageFromName.scoreLine('それは知らない、知ってるよ'), TrackRole.foreign);
+      expect(LanguageFromName.scoreLine('すみません'), TrackRole.foreign);
+    });
+
+    test('pure Chinese stays chinese', () {
+      expect(LanguageFromName.scoreLine('我不知道'), TrackRole.chinese);
+      expect(LanguageFromName.scoreLine('你好'), TrackRole.chinese);
+    });
+
+    test('kana file content votes foreign even with kanji', () {
+      final lines = List.generate(20, (i) => 'これはテスト$i番目の行です、内容は理解できません');
+      expect(LanguageFromName.fromContent(lines), TrackRole.foreign);
+    });
+
+    test('Chinese file content stays chinese', () {
+      final lines = List.generate(20, (i) => '这是第$i行测试字幕内容');
+      expect(LanguageFromName.fromContent(lines), TrackRole.chinese);
+    });
+  });
+
+  group('output language tag', () {
+    test('filename trailing token wins', () {
+      expect(LanguageFromName.outputFileTag(r'C:\a\Show.S01.jpn.ass'), 'jpn');
+      expect(LanguageFromName.outputFileTag('Show.S01.ENG.ass'), 'eng');
+      expect(LanguageFromName.explicitOutputFileTag('Show.no-tag.ass'), isNull);
+    });
+
+    test('extracted track names keep the token', () {
+      expect(
+        LanguageFromName.outputFileTag('Show.t4.[jpn].extracted.ass'),
+        'jpn',
+      );
+      expect(LanguageFromName.outputFileTag('Show.chs.extracted.ass'), 'chs');
+    });
+
+    test('tagFromContent detects kana', () {
+      expect(LanguageFromName.tagFromContent(['すみません、これは何ですか']), 'jpn');
+      expect(LanguageFromName.tagFromContent(['Hello there']), isNull);
+    });
+
+    test('foreignOutputTag maps container language', () {
+      expect(LanguageFromName.foreignOutputTag('jpn'), 'jpn');
+      expect(LanguageFromName.foreignOutputTag('eng'), 'eng');
+      expect(LanguageFromName.foreignOutputTag('und'), 'eng');
+      expect(LanguageFromName.foreignOutputTag(null), 'eng');
+      expect(LanguageFromName.foreignOutputTag('japanese'), 'jpn');
+    });
+
+    test('displayPrefix strips jpn/ita/etc tokens', () {
+      expect(
+        LanguageFromName.normalizePrefix('Show.jpn.ass'),
+        LanguageFromName.normalizePrefix('Show.ita.ass'),
+      );
+      expect(
+        LanguageFromName.normalizePrefix('Show.chs.extracted.ass'),
+        'show',
+      );
+    });
+  });
+
+  group('StyleCatalog.scaleLine', () {
+    const dialCh =
+        'Style: Dial-CH,HYQiHei-65S,48,&H4DFFFFFF,&H4DFFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,40,1';
+
+    test('factor 1 is identity', () {
+      expect(StyleCatalog.scaleLine(dialCh, 1.0), dialCh);
+    });
+
+    test('720p -> 1080p scales geometry by 1.5', () {
+      final scaled = StyleCatalog.scaleLine(dialCh, 1.5);
+      expect(scaled, contains('HYQiHei-65S,72,'));
+      expect(scaled, contains(',3,0,2,15,15,60,1'));
+      // colours and alignment untouched
+      expect(scaled, contains('&H4DFFFFFF'));
+      expect(scaled, contains('100,100,0,0,1,'));
+    });
+
+    test('fractional outline survives rounding', () {
+      const dialJp =
+          'Style: Dial-JP,FOT-Rodin ProN B,32,&H4DFFFFFF,&H4DFFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,1.6,0,2,10,10,10,1';
+      final scaled = StyleCatalog.scaleLine(dialJp, 1.5);
+      expect(scaled, contains('FOT-Rodin ProN B,48,'));
+      expect(scaled, contains(',2.4,0,2,'));
+    });
+
+    test('jp preset uses Dial names at 720p base', () {
+      final names = StyleCatalog.jpReferenceStyleLines.map(
+        (l) => AssStyle.tryParse(l)!.name,
+      );
+      expect(
+        names,
+        containsAll([
+          StyleCatalog.dialChinese,
+          StyleCatalog.dialForeign,
+          StyleCatalog.annotation,
+          StyleCatalog.lyric,
+        ]),
+      );
+      expect(StyleCatalog.jpReferenceBaseResY, 720);
     });
   });
 }

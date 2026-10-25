@@ -16,6 +16,7 @@ class SubtitleTrackInfo {
   final String title;
   final bool isDefault;
   final bool isForced;
+
   /// absolute stream index for ffmpeg -map 0:N
   final int? streamIndex;
 
@@ -45,18 +46,24 @@ class SubtitleTrackInfo {
         c == 's_text/utf8' ||
         c == 's_text/ass' ||
         c == 's_text/ssa' ||
-        c == 's_hdmv/pgs' // keep listed but not extractable as text
-        ;
+        c ==
+            's_hdmv/pgs' // keep listed but not extractable as text
+            ;
   }
 
   bool get isBitmap {
     final c = codec.toLowerCase();
-    return c.contains('pgs') || c.contains('vobsub') || c.contains('dvd_subtitle') || c.contains('hdmv');
+    return c.contains('pgs') ||
+        c.contains('vobsub') ||
+        c.contains('dvd_subtitle') ||
+        c.contains('hdmv');
   }
 
   bool get isSdh {
     final t = '${title.toLowerCase()} ${language.toLowerCase()}';
-    return t.contains('sdh') || t.contains('hearing') || RegExp(r'\bcc\b').hasMatch(t);
+    return t.contains('sdh') ||
+        t.contains('hearing') ||
+        RegExp(r'\bcc\b').hasMatch(t);
   }
 
   String get _langNorm => language.trim().toLowerCase().replaceAll('_', '-');
@@ -168,6 +175,21 @@ class SubtitleTrackInfo {
     final t = title.toLowerCase();
     if ({'eng', 'en', 'en-us', 'en-gb'}.contains(lang)) return true;
     return RegExp(r'english|\beng\b').hasMatch(t);
+  }
+
+  bool get isJapanese {
+    final lang = _langNorm;
+    if (lang == 'jpn' ||
+        lang == 'ja' ||
+        lang == 'jp' ||
+        lang == 'jap' ||
+        lang.startsWith('ja-')) {
+      return true;
+    }
+    return RegExp(
+      r'日本語|日語|日语|日文|\bjpn\b|japanese',
+      caseSensitive: false,
+    ).hasMatch(title);
   }
 
   bool get isCommentary {

@@ -57,6 +57,39 @@ function Test-PubUpToDate {
   return $true
 }
 
+function Clear-StaleCMakeCache {
+  param([string]$Platform = 'windows')
+
+  # A build/ folder copied or moved from another machine/path keeps a CMakeCache.txt
+  # that points at the old source dir, which makes `flutter build` fail with
+  # "The current CMakeCache.txt directory ... is different than ...".
+  $platformDir = Join-Path $Root "build\$Platform"
+  if (-not (Test-Path -LiteralPath $platformDir)) { return $false }
+
+  $expected = Join-Path $Root $Platform
+  $stale = $false
+  $caches = @(Get-ChildItem -LiteralPath $platformDir -Recurse -Filter 'CMakeCache.txt' -File -ErrorAction SilentlyContinue)
+  foreach ($cache in $caches) {
+    $hit = Select-String -LiteralPath $cache.FullName -Pattern '^CMAKE_HOME_DIRECTORY:INTERNAL=(.*)$' | Select-Object -First 1
+    if (-not $hit) { continue }
+    $srcDir = $hit.Matches[0].Groups[1].Value.Trim()
+    if ([string]::IsNullOrWhiteSpace($srcDir)) { continue }
+    $a = $srcDir.Replace('/', '\').TrimEnd('\')
+    $b = $expected.Replace('/', '\').TrimEnd('\')
+    if ($a -ine $b) {
+      Write-Host "Stale CMake cache from '$srcDir' (current: '$expected')" -ForegroundColor Yellow
+      $stale = $true
+    }
+  }
+
+  if (-not $stale) { return $false }
+
+  # Only drop the platform folder so hand-made artifacts elsewhere in build/ survive.
+  Write-Host "==> removing stale build\$Platform folder (CMake will regenerate)" -ForegroundColor Cyan
+  Remove-Item -LiteralPath $platformDir -Recurse -Force -ErrorAction SilentlyContinue
+  return $true
+}
+
 function Test-FlutterNoiseLine([string]$line) {
   $noise = @(
     'have newer versions incompatible with dependency constraints',
@@ -119,6 +152,8 @@ $env:CI = 'true'
 $env:FLUTTER_SUPPRESS_ANALYTICS = 'true'
 
 Write-Host "dual-sub-merge build ($Platform)" -ForegroundColor Green
+
+if (Clear-StaleCMakeCache -Platform $Platform) { $PubGet = $true }
 
 $needPub = $PubGet -or -not (Test-PubUpToDate)
 if ($needPub) {

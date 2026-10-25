@@ -4,7 +4,10 @@ import 'package:dual_sub_merge/ui/design_system.dart';
 import 'package:dual_sub_merge/ui/home_page.dart';
 import 'package:dual_sub_merge/ui/settings_page.dart';
 import 'package:dual_sub_merge/ui/styles_page.dart';
+import 'package:desktop_drop/desktop_drop.dart';
+import 'package:dual_sub_merge/models/extract_pair_mode.dart';
 import 'package:dual_sub_merge/models/merge_options.dart';
+import 'package:dual_sub_merge/models/process_mode.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -33,93 +36,188 @@ void main() {
   testWidgets('home workspace lays out at desktop size', (tester) async {
     await _pumpAt(tester, const HomePage(), const Size(1280, 720));
     expect(find.text('字幕处理'), findsWidgets);
-    expect(find.text('开始合并'), findsOneWidget);
+    expect(find.text('视频抽轨'), findsOneWidget);
+    expect(find.text('开始中英配对'), findsOneWidget);
+    expect(find.text('视频处理'), findsNothing);
   });
 
-  testWidgets('home workspace adapts to compact desktop size', (tester) async {
-    await _pumpAt(tester, const HomePage(), const Size(1024, 640));
-    expect(find.byIcon(Icons.subtitles_outlined), findsOneWidget);
-    expect(find.text('任务列表'), findsOneWidget);
-
-    await tester.tap(find.byIcon(Icons.movie_outlined).first);
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(find.text('开始抽轨'), findsOneWidget);
-    final exception = tester.takeException();
-    if (exception is FlutterError) {
-      // ignore: avoid_print
-      print(exception.toStringDeep());
-      debugDumpRenderTree();
-    }
-    expect(exception, isNull);
-  });
-
-  testWidgets('sidebar uses no Material ink and switches pages', (
+  testWidgets('sidebar switches between subtitle and extract workspaces', (
     tester,
   ) async {
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+    expect(find.text('任务列表'), findsOneWidget);
+    expect(find.text('开始中英配对'), findsOneWidget);
+
+    await tester.tap(find.widgetWithText(SidebarNavItem, '视频抽轨'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('开始抽轨'), findsOneWidget);
+    expect(find.text('开始中英配对'), findsNothing);
+    expect(find.byType(ExtractPairModePicker), findsOneWidget);
+    // Subtitle-only controls are hidden while extracting.
+    expect(find.widgetWithText(OptionCheck, 'HDR'), findsNothing);
+    expect(find.byType(SegmentedButton<OutputDirMode>), findsNothing);
+
+    await tester.tap(find.widgetWithText(SidebarNavItem, '字幕处理'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('开始中英配对'), findsOneWidget);
+    expect(find.byType(ExtractPairModePicker), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('sidebar uses no Material ink', (tester) async {
     await _pumpAt(tester, const HomePage(), const Size(1280, 720));
 
     Finder nav(String label) => find.widgetWithText(SidebarNavItem, label);
 
-    expect(
-      find.descendant(of: nav('字幕处理'), matching: find.byType(InkWell)),
-      findsNothing,
-    );
-    expect(
-      find.descendant(of: nav('字幕处理'), matching: find.byType(Material)),
-      findsNothing,
-    );
-    expect(find.text('开始合并'), findsOneWidget);
-
-    await tester.tap(nav('视频处理'));
-    await tester.pump(const Duration(milliseconds: 200));
-    expect(find.text('开始抽轨'), findsOneWidget);
+    for (final label in ['字幕处理', '视频抽轨', '字幕样式', '致谢黑名单', '设置']) {
+      expect(
+        find.descendant(of: nav(label), matching: find.byType(InkWell)),
+        findsNothing,
+      );
+      expect(
+        find.descendant(of: nav(label), matching: find.byType(Material)),
+        findsNothing,
+      );
+    }
+    expect(find.text('开始中英配对'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('option chips keep their own icons when selected', (
-    tester,
-  ) async {
+  testWidgets('option toggles are square checkboxes', (tester) async {
     SharedPreferences.setMockInitialValues({
       'removeCredits': true,
       'tagLanguageOnMerge': true,
+      'hdrSubtitle': true,
     });
     await _pumpAt(tester, const HomePage(), const Size(1280, 720));
 
-    final removeCredits = tester.widget<FilterChip>(
-      find.widgetWithText(FilterChip, '删除致谢'),
+    OptionCheck check(String label) =>
+        tester.widget<OptionCheck>(find.widgetWithText(OptionCheck, label));
+
+    expect(check('删除致谢').value, isTrue);
+    expect(check('标记语言改名').value, isTrue);
+    expect(check('HDR').value, isTrue);
+
+    await tester.tap(
+      find.descendant(
+        of: find.widgetWithText(OptionCheck, 'HDR'),
+        matching: find.byType(Checkbox),
+      ),
     );
-    final rename = tester.widget<FilterChip>(
-      find.widgetWithText(FilterChip, '标记语言改名'),
-    );
-    expect(removeCredits.showCheckmark, isFalse);
-    expect(rename.showCheckmark, isFalse);
+    await tester.pumpAndSettle();
+    expect(check('HDR').value, isFalse);
+    expect(tester.takeException(), isNull);
   });
 
-  testWidgets('subtitle input offers files or directory', (tester) async {
+  testWidgets('HDR choice is restored from settings', (tester) async {
+    SharedPreferences.setMockInitialValues({'hdrSubtitle': false});
     await _pumpAt(tester, const HomePage(), const Size(1280, 720));
 
-    await tester.tap(find.widgetWithText(OutlinedButton, '选择').first);
+    expect(
+      tester.widget<OptionCheck>(find.widgetWithText(OptionCheck, 'HDR')).value,
+      isFalse,
+    );
+  });
+
+  testWidgets('top tabs drive the subtitle process mode', (tester) async {
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    final picker = find.byType(ProcessModePicker);
+    expect(picker, findsOneWidget);
+    expect(tester.widget<ProcessModePicker>(picker).mode, ProcessMode.merge);
+    expect(find.byType(TabBar), findsOneWidget);
+    expect(find.text('开始中英配对'), findsOneWidget);
+    expect(find.textContaining('中外单语字幕按文件名前缀配对'), findsNothing);
+
+    await tester.tap(find.text('中文转换'));
     await tester.pumpAndSettle();
 
-    expect(find.text('选择字幕文件'), findsOneWidget);
-    expect(find.text('选择文件夹'), findsOneWidget);
+    expect(
+      tester.widget<ProcessModePicker>(picker).mode,
+      ProcessMode.chineseConvert,
+    );
+    expect(find.text('开始中文化'), findsOneWidget);
+    expect(find.text('开始中英配对'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('process mode is restored from settings', (tester) async {
+    SharedPreferences.setMockInitialValues({'processMode': 'chineseConvert'});
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    expect(find.text('中文转换'), findsOneWidget);
+    expect(find.text('开始中文化'), findsOneWidget);
+  });
+
+  testWidgets('extract workspace and pair mode are restored', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'workspace': 'extract',
+      'extractPairMode': 'chsJpn',
+    });
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    expect(find.text('开始抽轨'), findsOneWidget);
+    final picker = tester.widget<ExtractPairModePicker>(
+      find.byType(ExtractPairModePicker),
+    );
+    expect(picker.mode, ExtractPairMode.chsJpn);
+  });
+
+  testWidgets('legacy extract process mode opens the extract workspace', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'processMode': 'extract'});
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    expect(find.text('开始抽轨'), findsOneWidget);
+    expect(find.byType(ExtractPairModePicker), findsOneWidget);
+  });
+
+  testWidgets('input offers direct file and folder buttons', (tester) async {
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    // No first-level chooser any more: both entries sit on the input card.
+    expect(find.widgetWithText(OutlinedButton, '文件'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '文件夹'), findsOneWidget);
+    expect(find.widgetWithText(OutlinedButton, '选择'), findsNothing);
+    expect(find.text('选择字幕文件'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('one input card and one window-wide drop target', (tester) async {
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    expect(find.text('输入来源'), findsOneWidget);
+    expect(find.text('输出位置'), findsNothing);
+    // The whole window accepts drops, so there is exactly one DropTarget.
+    expect(find.byType(DropTarget), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('output directory is limited to Subtitles and source', (
+    tester,
+  ) async {
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    expect(find.text('./${MergeOptions.mergedSubdirName}'), findsOneWidget);
+    expect(find.text('./'), findsOneWidget);
+    expect(find.text('自定义'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
   testWidgets('input folder cache is ignored on app launch', (tester) async {
     const longPath =
         r'C:\Media Library\A Very Long Collection Name\Season 01\Episode Sources\Original Video And Subtitle Assets';
-    SharedPreferences.setMockInitialValues({
-      'lastDir': longPath,
-      'lastVideoDir': longPath,
-    });
+    SharedPreferences.setMockInitialValues({'lastDir': longPath});
     await _pumpAt(tester, const HomePage(), const Size(1024, 640));
 
     expect(
       find.textContaining('Original Video And Subtitle Assets'),
       findsNothing,
     );
-    expect(find.text('未选择字幕文件夹'), findsOneWidget);
+    expect(find.text('未选择输入'), findsOneWidget);
   });
 
   testWidgets('secondary pages lay out at compact desktop size', (

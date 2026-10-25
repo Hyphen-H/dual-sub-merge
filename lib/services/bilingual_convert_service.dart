@@ -3,11 +3,14 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../models/merge_options.dart';
+import '../models/process_mode.dart';
 import '../models/subtitle_cue.dart';
+import '../models/track_role.dart';
 import 'bilingual_split.dart';
 import 'blacklist.dart';
 import 'language_from_name.dart';
 import 'parse/ass_writer.dart';
+import 'parse/style_resolver.dart';
 import 'parse/subtitle_document.dart';
 import 'parse/subtitle_loader.dart';
 import 'text_pipeline.dart';
@@ -65,17 +68,36 @@ class BilingualConvertService {
       );
     }
 
+    final styles = StyleResolver.resolve(options);
     final outCues = <SubtitleCue>[
-      for (final item in split.items) TextPipeline.process(item.cue, item.role),
+      for (final item in split.items)
+        TextPipeline.process(
+          item.cue,
+          item.role,
+          hdr: options.hdrSubtitle,
+          names: styles.names,
+        ),
     ];
 
     final base = (displayPrefix != null && displayPrefix.isNotEmpty)
         ? displayPrefix
         : LanguageFromName.displayPrefix(source.path);
+    final detectedTag =
+        LanguageFromName.tagFromContent([
+          for (final item in split.items)
+            if (item.role == TrackRole.foreign) item.cue.rawText,
+        ]) ??
+        LanguageFromName.outputFileTag(source.path);
+    if (options.processMode == ProcessMode.jpMerge && detectedTag != 'jpn') {
+      return BilingualConvertResult(ok: false, message: '外文不是日文');
+    }
+    final foreignTag = options.processMode == ProcessMode.jpMerge
+        ? 'jpn'
+        : detectedTag;
     final cleanBase = base
-        .replaceAll(RegExp(r'\.chs\+eng$', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\.chs\+[a-z]+$', caseSensitive: false), '')
         .replaceAll(RegExp(r'[.\s_\-]+$'), '');
-    final finalName = '$cleanBase.chs+eng.ass';
+    final finalName = '$cleanBase.chs+$foreignTag.ass';
     final outPath = p.join(outDir.path, finalName);
 
     if (!options.overwrite && File(outPath).existsSync()) {

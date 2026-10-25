@@ -10,15 +10,31 @@ import 'package:path/path.dart' as p;
 void main() {
   group('hasTrailingLanguageTag', () {
     test('detects tagged names', () {
-      expect(LanguageFromName.hasTrailingLanguageTag(r'a\Show.chs.srt'), isTrue);
-      expect(LanguageFromName.hasTrailingLanguageTag(r'a\Show.eng.ass'), isTrue);
+      expect(
+        LanguageFromName.hasTrailingLanguageTag(r'a\Show.chs.srt'),
+        isTrue,
+      );
+      expect(
+        LanguageFromName.hasTrailingLanguageTag(r'a\Show.eng.ass'),
+        isTrue,
+      );
       expect(LanguageFromName.hasTrailingLanguageTag(r'a\Show.en.srt'), isTrue);
+      expect(LanguageFromName.hasTrailingLanguageTag(r'a\Show.ja.srt'), isTrue);
     });
 
     test('untagged names', () {
-      expect(LanguageFromName.hasTrailingLanguageTag(r'a\Show.S01E01.srt'), isFalse);
-      expect(LanguageFromName.hasTrailingLanguageTag(r'a\episode.ass'), isFalse);
-      expect(LanguageFromName.hasTrailingLanguageTag(r'a\My.Movie.srt'), isFalse);
+      expect(
+        LanguageFromName.hasTrailingLanguageTag(r'a\Show.S01E01.srt'),
+        isFalse,
+      );
+      expect(
+        LanguageFromName.hasTrailingLanguageTag(r'a\episode.ass'),
+        isFalse,
+      );
+      expect(
+        LanguageFromName.hasTrailingLanguageTag(r'a\My.Movie.srt'),
+        isFalse,
+      );
     });
   });
 
@@ -64,6 +80,34 @@ void main() {
       groups: [g],
     );
     expect(r2.renamedCount, 0);
+  });
+
+  test('detects kana in UTF-8 content and tags the foreign file jpn', () async {
+    final root = await Directory.systemTemp.createTemp('dsm-tag-jp-');
+    addTearDown(() {
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    });
+
+    final zh = File(p.join(root.path, 'EpA.srt'));
+    final jp = File(p.join(root.path, 'EpB.srt'));
+    await zh.writeAsString('1\n00:00:01,000 --> 00:00:02,000\n你好\n');
+    await jp.writeAsString('1\n00:00:01,000 --> 00:00:02,000\nすみません、日本語です\n');
+
+    final g = MatchGroup(
+      prefix: 'ep',
+      chinese: SubtitleFileRef(file: zh, role: TrackRole.chinese),
+      foreign: SubtitleFileRef(file: jp, role: TrackRole.foreign),
+    );
+
+    final r = await LanguageTagRenameService().renameGroups(
+      inputDir: root,
+      groups: [g],
+    );
+
+    expect(r.renamedCount, 2);
+    final jpOut = File(p.join(root.path, 'eng-sub', 'EpB.jpn.srt'));
+    expect(jpOut.existsSync(), isTrue);
+    expect(g.foreign!.languageTag, 'jpn');
   });
 
   test('skips files that already have language tags', () async {

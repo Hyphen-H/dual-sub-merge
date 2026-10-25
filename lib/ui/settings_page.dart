@@ -366,7 +366,7 @@ class _SettingsPageState extends State<SettingsPage> {
                           horizontal: 14,
                           vertical: 2,
                         ),
-                        title: const Text('覆盖已存在的 .chs+eng.ass'),
+                        title: const Text('覆盖已存在的 .chs+语言.ass'),
                         subtitle: const Text('关闭时将跳过已经存在的同名输出文件。'),
                         value: widget.options.overwrite,
                         onChanged: (v) =>

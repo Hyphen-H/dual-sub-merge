@@ -16,7 +16,7 @@ class SubtitleTextDecoder {
     }
 
     try {
-      return utf8.decode(bytes);
+      return utf8.decode(bytes, allowMalformed: true);
     } catch (_) {
       return latin1.decode(bytes, allowInvalid: true);
     }

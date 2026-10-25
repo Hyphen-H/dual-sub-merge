@@ -5,6 +5,7 @@ import 'package:path/path.dart' as p;
 import '../models/match_group.dart';
 import '../models/track_role.dart';
 import 'language_from_name.dart';
+import 'parse/text_decoder.dart';
 
 class LanguageTagRenameResult {
   LanguageTagRenameResult({
@@ -64,7 +65,10 @@ class LanguageTagRenameService {
         groupLabel: g.outputBase,
         logs: logs,
       );
-      if (en != null) g.foreign = en.$1;
+      if (en != null) {
+        g.foreign = en.$1;
+        g.foreignTag = en.$1.languageTag;
+      }
       renamed += en?.$2 ?? 0;
       skipped += en?.$3 ?? 0;
       fail += en?.$4 ?? 0;
@@ -76,6 +80,22 @@ class LanguageTagRenameService {
       failCount: fail,
       logs: logs,
     );
+  }
+
+  /// Returns `jpn` when the file content carries kana, else `eng`.
+  Future<String> _detectForeignTag(File file) async {
+    try {
+      final handle = await file.open();
+      try {
+        final bytes = await handle.read(64 * 1024);
+        final text = SubtitleTextDecoder.decode(bytes);
+        return LanguageFromName.tagFromContent(text.split('\n')) ?? 'eng';
+      } finally {
+        await handle.close();
+      }
+    } catch (_) {
+      return 'eng';
+    }
   }
 
   /// Returns (updatedRef, renamedDelta, skippedDelta, failDelta) or null if no ref.
@@ -99,7 +119,10 @@ class LanguageTagRenameService {
       return (ref, 0, 1, 0);
     }
 
-    final tag = role == TrackRole.chinese ? 'chs' : 'eng';
+    final tag = role == TrackRole.chinese
+        ? 'chs'
+        : LanguageFromName.explicitOutputFileTag(ref.file.path) ??
+              await _detectForeignTag(ref.file);
     final sub = role == TrackRole.chinese ? chsSubdir : engSubdir;
     final ext = p.extension(ref.file.path);
     final stem = p.basenameWithoutExtension(ref.file.path);
@@ -112,7 +135,9 @@ class LanguageTagRenameService {
       }
       if (File(destPath).existsSync()) {
         if (!overwrite) {
-          logs.add('[$groupLabel] 已存在，跳过: ${p.join(sub, p.basename(destPath))}');
+          logs.add(
+            '[$groupLabel] 已存在，跳过: ${p.join(sub, p.basename(destPath))}',
+          );
           return (ref, 0, 1, 0);
         }
         await File(destPath).delete();
@@ -122,7 +147,12 @@ class LanguageTagRenameService {
         '[$groupLabel] 改名: ${p.basename(ref.file.path)} → ${p.join(sub, p.basename(moved.path))}',
       );
       return (
-        SubtitleFileRef(file: moved, role: role, fromExtract: ref.fromExtract),
+        SubtitleFileRef(
+          file: moved,
+          role: role,
+          fromExtract: ref.fromExtract,
+          languageTag: role == TrackRole.foreign ? tag : ref.languageTag,
+        ),
         1,
         0,
         0,
@@ -135,7 +165,9 @@ class LanguageTagRenameService {
         }
         if (File(destPath).existsSync()) {
           if (!overwrite) {
-            logs.add('[$groupLabel] 已存在，跳过: ${p.join(sub, p.basename(destPath))}');
+            logs.add(
+              '[$groupLabel] 已存在，跳过: ${p.join(sub, p.basename(destPath))}',
+            );
             return (ref, 0, 1, 0);
           }
           await File(destPath).delete();
@@ -147,7 +179,12 @@ class LanguageTagRenameService {
           '[$groupLabel] 改名: ${p.basename(ref.file.path)} → ${p.join(sub, p.basename(moved.path))}',
         );
         return (
-          SubtitleFileRef(file: moved, role: role, fromExtract: ref.fromExtract),
+          SubtitleFileRef(
+            file: moved,
+            role: role,
+            fromExtract: ref.fromExtract,
+            languageTag: role == TrackRole.foreign ? tag : ref.languageTag,
+          ),
           1,
           0,
           0,

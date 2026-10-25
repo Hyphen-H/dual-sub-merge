@@ -13,7 +13,9 @@ class TimeUtil {
       frac = int.tryParse(f) ?? 0;
       // ass uses centiseconds often (2 digits)
       if (secParts[1].length <= 2) {
-        frac = (int.tryParse(secParts[1].padRight(2, '0').substring(0, 2)) ?? 0) * 10;
+        frac =
+            (int.tryParse(secParts[1].padRight(2, '0').substring(0, 2)) ?? 0) *
+            10;
       }
     }
     return ((h * 3600 + m * 60 + sec) * 1000) + frac;
@@ -27,7 +29,13 @@ class TimeUtil {
     final m = int.tryParse(p[1]) ?? 0;
     final secParts = p[2].split(RegExp(r'[.,]'));
     final sec = int.tryParse(secParts[0]) ?? 0;
-    final ms = int.tryParse((secParts.length > 1 ? secParts[1] : '0').padRight(3, '0').substring(0, 3)) ?? 0;
+    final ms =
+        int.tryParse(
+          (secParts.length > 1 ? secParts[1] : '0')
+              .padRight(3, '0')
+              .substring(0, 3),
+        ) ??
+        0;
     return ((h * 3600 + m * 60 + sec) * 1000) + ms;
   }
 

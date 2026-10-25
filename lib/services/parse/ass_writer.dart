@@ -3,6 +3,7 @@ import 'dart:io';
 import '../../models/ass_style.dart';
 import '../../models/merge_options.dart';
 import '../../models/subtitle_cue.dart';
+import 'style_resolver.dart';
 import 'time_util.dart';
 
 class AssWriter {
@@ -12,13 +13,12 @@ class AssWriter {
     required MergeOptions options,
     String title = 'dual-sub-merge',
   }) async {
-    final styles = options.styleLines
-        .map(AssStyle.tryParse)
-        .whereType<AssStyle>()
-        .toList();
-    if (styles.isEmpty) {
-      styles.addAll(StyleCatalog.defaults());
-    }
+    final resolved = StyleResolver.resolve(options);
+    final baseResY = resolved.baseResY;
+    final scale = options.playResY > 0 ? options.playResY / baseResY : 1.0;
+    final styleLines = <String>[
+      for (final line in resolved.lines) StyleCatalog.scaleLine(line, scale),
+    ];
 
     final buf = StringBuffer()
       ..writeln('[Script Info]')
@@ -34,22 +34,27 @@ class AssWriter {
       ..writeln(
         'Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding',
       );
-    for (final s in styles) {
-      buf.writeln(s.line);
+    for (final s in styleLines) {
+      buf.writeln(s);
     }
     buf
       ..writeln()
       ..writeln('[Events]')
-      ..writeln('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text');
+      ..writeln(
+        'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+      );
 
-    final sorted = [...cues]..sort((a, b) {
+    final sorted = [...cues]
+      ..sort((a, b) {
         final c = a.startMs.compareTo(b.startMs);
         if (c != 0) return c;
         return _styleRank(a.outputStyle).compareTo(_styleRank(b.outputStyle));
       });
 
     for (final cue in sorted) {
-      final style = cue.outputStyle.isEmpty ? StyleCatalog.chinese : cue.outputStyle;
+      final style = cue.outputStyle.isEmpty
+          ? resolved.names.chinese
+          : cue.outputStyle;
       buf.writeln(
         'Dialogue: 0,${TimeUtil.formatAss(cue.startMs)},${TimeUtil.formatAss(cue.endMs)},$style,,0,0,0,,${cue.text}',
       );
@@ -61,11 +66,11 @@ class AssWriter {
     return file;
   }
 
-  static int _styleRank(String style) {
-    if (style == StyleCatalog.lyric) return 0;
-    if (style == StyleCatalog.annotation) return 1;
-    if (style == StyleCatalog.foreign) return 2;
-    if (style == StyleCatalog.chinese) return 3;
-    return 9;
-  }
+  static int _styleRank(String style) => switch (StyleCatalog.roleOf(style)) {
+    StyleRole.lyric => 0,
+    StyleRole.annotation => 1,
+    StyleRole.foreign => 2,
+    StyleRole.chinese => 3,
+    null => 9,
+  };
 }

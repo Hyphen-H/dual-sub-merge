@@ -56,7 +56,9 @@ void main() {
         ..writeln('ScriptType: v4.00+')
         ..writeln()
         ..writeln('[Events]')
-        ..writeln('Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text');
+        ..writeln(
+          'Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text',
+        );
       for (var i = 0; i < 6; i++) {
         buf.writeln(
           'Dialogue: 0,0:00:0$i.00,0:00:0$i.50,Default,,0,0,0,,'

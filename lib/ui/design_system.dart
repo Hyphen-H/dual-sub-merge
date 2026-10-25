@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../models/extract_pair_mode.dart';
 import '../models/merge_options.dart';
+import '../models/process_mode.dart';
 
 class UiTokens {
   const UiTokens._();
@@ -57,12 +59,12 @@ class PageHeader extends StatelessWidget {
   const PageHeader({
     super.key,
     required this.title,
-    required this.description,
+    this.description,
     this.trailing,
   });
 
   final String title;
-  final String description;
+  final String? description;
   final Widget? trailing;
 
   @override
@@ -75,13 +77,15 @@ class PageHeader extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(title, style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 5),
-              Text(
-                description,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: UiTokens.muted),
-              ),
+              if (description != null) ...[
+                const SizedBox(height: 5),
+                Text(
+                  description!,
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: UiTokens.muted),
+                ),
+              ],
             ],
           ),
         ),
@@ -190,8 +194,9 @@ class _SidebarNavItemState extends State<SidebarNavItem> {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
-        mainAxisAlignment:
-            compact ? MainAxisAlignment.center : MainAxisAlignment.start,
+        mainAxisAlignment: compact
+            ? MainAxisAlignment.center
+            : MainAxisAlignment.start,
         children: [
           Icon(widget.icon, size: 18, color: fg),
           if (!compact) ...[
@@ -203,8 +208,9 @@ class _SidebarNavItemState extends State<SidebarNavItem> {
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: fg,
-                  fontWeight:
-                      widget.selected ? FontWeight.w500 : FontWeight.w400,
+                  fontWeight: widget.selected
+                      ? FontWeight.w500
+                      : FontWeight.w400,
                 ),
               ),
             ),
@@ -280,6 +286,182 @@ class StatusBadge extends StatelessWidget {
   }
 }
 
+/// Square checkbox with a label, sized to line up with [ResolutionPicker].
+class OptionCheck extends StatelessWidget {
+  const OptionCheck({
+    super.key,
+    required this.label,
+    required this.value,
+    required this.onChanged,
+    this.tooltip,
+    this.enabled = true,
+  });
+
+  final String label;
+  final bool value;
+  final ValueChanged<bool>? onChanged;
+  final String? tooltip;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final active = enabled && value;
+    final fg = active
+        ? scheme.primary
+        : enabled
+        ? scheme.onSurfaceVariant
+        : Theme.of(context).disabledColor;
+
+    Widget row = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        SizedBox(
+          height: 32,
+          width: 32,
+          child: Checkbox(
+            value: value,
+            onChanged: enabled ? (v) => onChanged?.call(v ?? false) : null,
+            visualDensity: VisualDensity.compact,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+        ),
+        const SizedBox(width: 2),
+        Text(
+          label,
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(color: fg, height: 1.2),
+        ),
+      ],
+    );
+
+    if (tooltip != null) {
+      row = Tooltip(
+        message: tooltip!,
+        waitDuration: const Duration(milliseconds: 450),
+        child: row,
+      );
+    }
+    return row;
+  }
+}
+
+class ProcessModePicker extends StatefulWidget {
+  const ProcessModePicker({
+    super.key,
+    required this.mode,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  final ProcessMode mode;
+  final ValueChanged<ProcessMode> onChanged;
+  final bool enabled;
+
+  @override
+  State<ProcessModePicker> createState() => _ProcessModePickerState();
+}
+
+class _ProcessModePickerState extends State<ProcessModePicker>
+    with SingleTickerProviderStateMixin {
+  late final TabController _controller;
+
+  int _indexOf(ProcessMode mode) => ProcessMode.values.indexOf(mode);
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TabController(
+      length: ProcessMode.values.length,
+      initialIndex: _indexOf(widget.mode),
+      vsync: this,
+    );
+  }
+
+  @override
+  void didUpdateWidget(covariant ProcessModePicker oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final index = _indexOf(widget.mode);
+    if (_controller.index != index) _controller.index = index;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      container: true,
+      label: '字幕处理方式',
+      child: IgnorePointer(
+        ignoring: !widget.enabled,
+        child: TabBar(
+          controller: _controller,
+          isScrollable: true,
+          onTap: (index) => widget.onChanged(ProcessMode.values[index]),
+          labelColor: scheme.primary,
+          unselectedLabelColor: scheme.onSurfaceVariant,
+          indicatorColor: scheme.primary,
+          indicatorWeight: 2,
+          indicatorSize: TabBarIndicatorSize.label,
+          dividerColor: UiTokens.border,
+          labelStyle: Theme.of(
+            context,
+          ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
+          unselectedLabelStyle: Theme.of(context).textTheme.labelLarge,
+          labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: EdgeInsets.zero,
+          tabs: [for (final mode in ProcessMode.values) Tab(text: mode.label)],
+        ),
+      ),
+    );
+  }
+}
+
+class ExtractPairModePicker extends StatelessWidget {
+  const ExtractPairModePicker({
+    super.key,
+    required this.mode,
+    required this.onChanged,
+    this.enabled = true,
+  });
+
+  final ExtractPairMode mode;
+  final ValueChanged<ExtractPairMode> onChanged;
+  final bool enabled;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: mode.tooltip,
+      waitDuration: const Duration(milliseconds: 450),
+      child: Semantics(
+        label: '抽轨语言',
+        child: SegmentedButton<ExtractPairMode>(
+          showSelectedIcon: false,
+          style: const ButtonStyle(
+            visualDensity: VisualDensity.compact,
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          segments: const [
+            ButtonSegment(value: ExtractPairMode.chsEng, label: Text('中英')),
+            ButtonSegment(value: ExtractPairMode.chsJpn, label: Text('中日')),
+          ],
+          selected: {mode},
+          onSelectionChanged: enabled
+              ? (values) => onChanged(values.first)
+              : null,
+        ),
+      ),
+    );
+  }
+}
+
 class ResolutionPicker extends StatefulWidget {
   const ResolutionPicker({
     super.key,
@@ -300,6 +482,7 @@ class ResolutionPicker extends StatefulWidget {
 
 class _ResolutionPickerState extends State<ResolutionPicker> {
   static const _duration = Duration(milliseconds: 120);
+
   /// Match Material 3 FilterChip default height.
   static const _chipHeight = 32.0;
 
@@ -307,8 +490,10 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
   bool _pressed = false;
   bool _menuOpen = false;
 
-  int get _index =>
-      widget.index.clamp(0, widget.presets.isEmpty ? 0 : widget.presets.length - 1);
+  int get _index => widget.index.clamp(
+    0,
+    widget.presets.isEmpty ? 0 : widget.presets.length - 1,
+  );
 
   ResolutionPreset get _current => widget.presets[_index];
 
@@ -381,9 +566,7 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
         }
 
         return MouseRegion(
-          cursor: enabled
-              ? SystemMouseCursors.click
-              : SystemMouseCursors.basic,
+          cursor: enabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
           onEnter: (_) {
             if (enabled) setState(() => _hovered = true);
           },
@@ -393,12 +576,8 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
           }),
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onTapDown: enabled
-                ? (_) => setState(() => _pressed = true)
-                : null,
-            onTapUp: enabled
-                ? (_) => setState(() => _pressed = false)
-                : null,
+            onTapDown: enabled ? (_) => setState(() => _pressed = true) : null,
+            onTapUp: enabled ? (_) => setState(() => _pressed = false) : null,
             onTapCancel: enabled
                 ? () => setState(() => _pressed = false)
                 : null,
@@ -431,11 +610,7 @@ class _ResolutionPickerState extends State<ResolutionPicker> {
                     turns: open ? 0.5 : 0,
                     duration: _duration,
                     curve: Curves.easeOut,
-                    child: Icon(
-                      Icons.expand_more_rounded,
-                      size: 18,
-                      color: fg,
-                    ),
+                    child: Icon(Icons.expand_more_rounded, size: 18, color: fg),
                   ),
                 ],
               ),
@@ -559,8 +734,9 @@ class _ResolutionMenuItemState extends State<_ResolutionMenuItem> {
                       widget.preset.label,
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                         color: titleColor,
-                        fontWeight:
-                            selected ? FontWeight.w600 : FontWeight.w400,
+                        fontWeight: selected
+                            ? FontWeight.w600
+                            : FontWeight.w400,
                         height: 1.2,
                       ),
                     ),

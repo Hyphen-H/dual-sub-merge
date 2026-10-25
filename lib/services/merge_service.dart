@@ -4,18 +4,23 @@ import 'package:path/path.dart' as p;
 
 import '../models/match_group.dart';
 import '../models/merge_options.dart';
+import '../models/process_mode.dart';
 import '../models/subtitle_cue.dart';
 import '../models/track_role.dart';
 import 'bilingual_convert_service.dart';
+import 'chinese_convert_service.dart';
 import 'bilingual_inline.dart';
 import 'blacklist.dart';
 import 'extract/extract_service.dart';
 import 'extract/track_info.dart';
 import 'extract/track_selector.dart';
 import 'file_matcher.dart';
+import 'language_from_name.dart';
 import 'language_tag_rename_service.dart';
 import 'parse/ass_writer.dart';
+import 'parse/style_resolver.dart';
 import 'parse/subtitle_loader.dart';
+import 'process_mode_service.dart';
 import 'text_pipeline.dart';
 import 'tools/tool_resolver.dart';
 
@@ -41,6 +46,7 @@ class MergeResult {
     required this.removedCredits,
     required this.skippedBilingual,
     required this.convertedBilingual,
+    required this.convertedChinese,
     required this.logs,
     required this.outputs,
   });
@@ -50,6 +56,7 @@ class MergeResult {
   final int removedCredits;
   final List<String> skippedBilingual;
   final int convertedBilingual;
+  final int convertedChinese;
   final List<String> logs;
   final List<String> outputs;
 }
@@ -62,6 +69,7 @@ class MergeService {
     this.onPickTracks,
     this.selectedPrefixes,
     this.selectedTrackIdsByVideo,
+    this.probeCache,
   });
 
   final MergeOptions options;
@@ -75,6 +83,9 @@ class MergeService {
   onPickTracks;
   final Set<String>? selectedPrefixes;
   final Map<String, Set<int>>? selectedTrackIdsByVideo;
+
+  /// Track lists the UI already probed, keyed by video path.
+  final Map<String, List<SubtitleTrackInfo>>? probeCache;
 
   bool _isSelected(MatchGroup g) {
     if (selectedPrefixes == null) return true;
@@ -131,6 +142,7 @@ class MergeService {
         removedCredits: 0,
         skippedBilingual: const [],
         convertedBilingual: 0,
+        convertedChinese: 0,
         logs: logs,
         outputs: outputs,
       );
@@ -185,7 +197,9 @@ class MergeService {
         if (explicitTrackSelection != null) {
           final selectedIds =
               explicitTrackSelection[g.video!.path] ?? const <int>{};
-          final tracks = await extractor.probeTracks(g.video!);
+          final tracks =
+              probeCache?[g.video!.path] ??
+              await extractor.probeTracks(g.video!);
           final selectedTracks = tracks
               .where((track) => selectedIds.contains(track.id))
               .toList();
@@ -205,7 +219,10 @@ class MergeService {
 
         extractor.onNeedUserPick = (path, tracks, need) async {
           if (folderChoice != null) {
-            final auto = TrackSelector.autoSelect(tracks);
+            final auto = TrackSelector.autoSelect(
+              tracks,
+              mode: options.extractPairMode,
+            );
             return SelectedTracks(
               chinese: folderChoice!.pickChinese?.call(tracks) ?? auto.chinese,
               foreign: folderChoice!.pickForeign?.call(tracks) ?? auto.foreign,
@@ -222,7 +239,10 @@ class MergeService {
                       try {
                         return ts.firstWhere((t) => t.id == zhId);
                       } catch (_) {
-                        return TrackSelector.autoSelect(ts).chinese;
+                        return TrackSelector.autoSelect(
+                          ts,
+                          mode: options.extractPairMode,
+                        ).chinese;
                       }
                     }
               ..pickForeign = enId == null
@@ -231,7 +251,10 @@ class MergeService {
                       try {
                         return ts.firstWhere((t) => t.id == enId);
                       } catch (_) {
-                        return TrackSelector.autoSelect(ts).foreign;
+                        return TrackSelector.autoSelect(
+                          ts,
+                          mode: options.extractPairMode,
+                        ).foreign;
                       }
                     };
           }
@@ -280,6 +303,7 @@ class MergeService {
       removedCredits: 0,
       skippedBilingual: const [],
       convertedBilingual: 0,
+      convertedChinese: 0,
       logs: logs,
       outputs: outputs,
     );
@@ -297,6 +321,10 @@ class MergeService {
     var fail = 0;
     var removedCredits = 0;
     var convertedBilingual = 0;
+    var convertedChinese = 0;
+    final mode = options.processMode;
+    final hdrSubtitle = options.hdrSubtitle;
+    final styles = StyleResolver.resolve(options);
 
     final outDir = outputDir ?? dir;
     if (!outDir.existsSync()) {
@@ -341,8 +369,10 @@ class MergeService {
 
     for (final g in groups) {
       if (!_isSelected(g)) continue;
-      if (g.isReady) continue;
-      if (g.kind == GroupKind.bilingualFile) continue;
+      if (ProcessModeService.isReady(g, mode)) continue;
+      if (mode != ProcessMode.merge || g.kind == GroupKind.bilingualFile) {
+        continue;
+      }
       if (onConflict != null) {
         final ok = await onConflict!(g);
         if (ok) FileMatcher.reevaluate(g);
@@ -351,6 +381,7 @@ class MergeService {
 
     final blacklist = BlacklistFilter(options.blacklistRules);
     final converter = BilingualConvertService(options);
+    final chineseConverter = ChineseConvertService(options);
     final workList = groups.where(_isSelected).toList();
 
     for (var i = 0; i < workList.length; i++) {
@@ -359,11 +390,85 @@ class MergeService {
         MergeProgress(
           current: i + 1,
           total: workList.length,
-          message: g.kind == GroupKind.bilingualFile
-              ? '转换双语: ${g.outputBase}'
-              : '合并: ${g.outputBase}',
+          message: '${mode.workingLabel}: ${g.outputBase}',
         ),
       );
+
+      // —— 中文转换：单中字幕 → .chs.ass ——
+      if (mode == ProcessMode.chineseConvert) {
+        final source = ProcessModeService.resolveSource(g);
+        if (source == null) {
+          fail++;
+          logs.add('[${g.outputBase}] 跳过: ${g.message}');
+          continue;
+        }
+        try {
+          final r = await chineseConverter.convertFile(
+            source: source,
+            outDir: outDir,
+            displayPrefix: g.displayPrefix,
+          );
+          if (r.ok) {
+            g.status = GroupStatus.done;
+            g.outputPath = r.outputPath;
+            outputs.add(r.outputPath!);
+            success++;
+            convertedChinese++;
+            removedCredits += r.removedCredits;
+            logs.add('[${g.outputBase}] 中文转换完成: ${r.message}');
+          } else {
+            g.status = GroupStatus.bilingualInline;
+            g.message = r.message;
+            skippedBilingual.add(source.path);
+            fail++;
+            logs.add('[${g.outputBase}] 中文转换跳过: ${r.message}');
+          }
+        } catch (e) {
+          fail++;
+          g.status = GroupStatus.failed;
+          g.message = '$e';
+          logs.add('[${g.outputBase}] 中文转换失败: $e');
+        }
+        continue;
+      }
+
+      // —— 样式转换：任何字幕文件都按 \N 双语拆 ——
+      if (mode == ProcessMode.styleConvert) {
+        final source = ProcessModeService.resolveSource(g);
+        if (source == null) {
+          fail++;
+          logs.add('[${g.outputBase}] 跳过: ${g.message}');
+          continue;
+        }
+        try {
+          final r = await converter.convertFile(
+            source: source,
+            outDir: outDir,
+            displayPrefix: g.displayPrefix,
+          );
+          if (r.ok) {
+            g.status = GroupStatus.done;
+            g.outputPath = r.outputPath;
+            outputs.add(r.outputPath!);
+            success++;
+            convertedBilingual++;
+            removedCredits += r.removedCredits;
+            logs.add('[${g.outputBase}] 样式转换完成: ${r.message}');
+          } else {
+            g.status = GroupStatus.bilingualInline;
+            g.message = r.message;
+            skippedBilingual.add(source.path);
+            fail++;
+            logs.add('[${g.outputBase}] 样式转换跳过: ${r.message}');
+          }
+        } catch (e) {
+          fail++;
+          g.status = GroupStatus.failed;
+          g.message = '$e';
+          logs.add('[${g.outputBase}] 样式转换失败: $e');
+        }
+        continue;
+      }
 
       // —— bilingual file convert ——
       if (g.kind == GroupKind.bilingualFile && g.bilingualSource != null) {
@@ -397,7 +502,16 @@ class MergeService {
         continue;
       }
 
-      if (!g.isReady) {
+      if (mode == ProcessMode.jpMerge &&
+          !ProcessModeService.hasJapaneseForeign(g)) {
+        fail++;
+        g.status = GroupStatus.missingForeign;
+        g.message = '外文不是日文';
+        logs.add('[${g.outputBase}] 跳过: 外文不是日文');
+        continue;
+      }
+
+      if (!ProcessModeService.isReady(g, mode)) {
         logs.add('[${g.outputBase}] 跳过: ${g.message}');
         fail++;
         continue;
@@ -446,11 +560,35 @@ class MergeService {
         }
 
         final outCues = <SubtitleCue>[
-          ...zhCues.map((c) => TextPipeline.process(c, TrackRole.chinese)),
-          ...enCues.map((c) => TextPipeline.process(c, TrackRole.foreign)),
+          ...zhCues.map(
+            (c) => TextPipeline.process(
+              c,
+              TrackRole.chinese,
+              hdr: hdrSubtitle,
+              names: styles.names,
+            ),
+          ),
+          ...enCues.map(
+            (c) => TextPipeline.process(
+              c,
+              TrackRole.foreign,
+              hdr: hdrSubtitle,
+              names: styles.names,
+            ),
+          ),
         ];
 
-        final outName = '${g.outputBase}.chs+eng.ass';
+        final foreignTag = mode == ProcessMode.jpMerge
+            ? 'jpn'
+            : g.foreignTag ??
+                  LanguageFromName.explicitOutputFileTag(
+                    g.foreign!.file.path,
+                  ) ??
+                  LanguageFromName.tagFromContent(
+                    enCues.map((c) => c.rawText),
+                  ) ??
+                  'eng';
+        final outName = '${g.outputBase}.chs+$foreignTag.ass';
         final outPath = p.join(outDir.path, outName);
         if (!options.overwrite && File(outPath).existsSync()) {
           logs.add('[${g.outputBase}] 已存在，跳过: $outName');
@@ -492,6 +630,7 @@ class MergeService {
       removedCredits: removedCredits,
       skippedBilingual: skippedBilingual.toSet().toList(),
       convertedBilingual: convertedBilingual,
+      convertedChinese: convertedChinese,
       logs: logs,
       outputs: outputs,
     );

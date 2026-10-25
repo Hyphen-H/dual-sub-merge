@@ -3,12 +3,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 class ToolPaths {
-  ToolPaths({
-    this.mkvmerge,
-    this.mkvextract,
-    this.ffmpeg,
-    this.ffprobe,
-  });
+  ToolPaths({this.mkvmerge, this.mkvextract, this.ffmpeg, this.ffprobe});
 
   String? mkvmerge;
   String? mkvextract;
@@ -29,9 +24,11 @@ class ToolResolver {
 
     if (mkvToolNixDir.trim().isNotEmpty) {
       final dir = mkvToolNixDir.trim();
-      paths.mkvmerge = _existing(p.join(dir, 'mkvmerge.exe')) ??
+      paths.mkvmerge =
+          _existing(p.join(dir, 'mkvmerge.exe')) ??
           _existing(p.join(dir, 'mkvmerge'));
-      paths.mkvextract = _existing(p.join(dir, 'mkvextract.exe')) ??
+      paths.mkvextract =
+          _existing(p.join(dir, 'mkvextract.exe')) ??
           _existing(p.join(dir, 'mkvextract'));
     }
 
@@ -67,7 +64,8 @@ class ToolResolver {
     // if ffmpeg found, try sibling ffprobe
     if (paths.ffmpeg != null && paths.ffprobe == null) {
       final dir = p.dirname(paths.ffmpeg!);
-      paths.ffprobe = _existing(p.join(dir, 'ffprobe.exe')) ??
+      paths.ffprobe =
+          _existing(p.join(dir, 'ffprobe.exe')) ??
           _existing(p.join(dir, 'ffprobe'));
     }
 
@@ -88,7 +86,10 @@ class ToolResolver {
           runInShell: true,
         );
         if (result.exitCode == 0) {
-          final out = (result.stdout as String).trim().split(RegExp(r'\r?\n')).first;
+          final out = (result.stdout as String)
+              .trim()
+              .split(RegExp(r'\r?\n'))
+              .first;
           if (out.isNotEmpty && File(out).existsSync()) return out;
         }
       } catch (_) {}

@@ -37,9 +37,18 @@ class TextPipeline {
     '’': "'",
   };
 
-  static final _htmlItalicOpen = RegExp(r'<\s*i(?:\s[^>]*)?>', caseSensitive: false);
-  static final _htmlItalicClose = RegExp(r'<\s*/\s*i\s*>', caseSensitive: false);
-  static final _htmlEmOpen = RegExp(r'<\s*em(?:\s[^>]*)?>', caseSensitive: false);
+  static final _htmlItalicOpen = RegExp(
+    r'<\s*i(?:\s[^>]*)?>',
+    caseSensitive: false,
+  );
+  static final _htmlItalicClose = RegExp(
+    r'<\s*/\s*i\s*>',
+    caseSensitive: false,
+  );
+  static final _htmlEmOpen = RegExp(
+    r'<\s*em(?:\s[^>]*)?>',
+    caseSensitive: false,
+  );
   static final _htmlEmClose = RegExp(r'<\s*/\s*em\s*>', caseSensitive: false);
   static final _htmlOther = RegExp(r'</?[a-zA-Z][^>]*>');
 
@@ -57,7 +66,12 @@ class TextPipeline {
         .trim();
   }
 
-  static SubtitleCue process(SubtitleCue cue, TrackRole role) {
+  static SubtitleCue process(
+    SubtitleCue cue,
+    TrackRole role, {
+    bool hdr = true,
+    StyleNames? names,
+  }) {
     final raw = cue.rawText;
     final hadAn8 = _an8.hasMatch(raw);
     final plain = plainText(raw);
@@ -68,6 +82,8 @@ class TextPipeline {
       role: role,
       isLyric: isLyric,
       isAnnotation: hadAn8,
+      hdr: hdr,
+      names: names,
     );
 
     return cue.copyWith(
@@ -83,11 +99,23 @@ class TextPipeline {
     required TrackRole role,
     required bool isLyric,
     required bool isAnnotation,
+    bool hdr = true,
+    StyleNames? names,
   }) {
-    if (isLyric) return StyleCatalog.lyric;
-    if (isAnnotation) return StyleCatalog.annotation;
-    if (role == TrackRole.foreign) return StyleCatalog.foreign;
-    return StyleCatalog.chinese;
+    String pick(StyleRole styleRole) {
+      if (names == null) return StyleCatalog.nameFor(styleRole, hdr: hdr);
+      return switch (styleRole) {
+        StyleRole.chinese => names.chinese,
+        StyleRole.foreign => names.foreign,
+        StyleRole.annotation => names.annotation,
+        StyleRole.lyric => names.lyric,
+      };
+    }
+
+    if (isLyric) return pick(StyleRole.lyric);
+    if (isAnnotation) return pick(StyleRole.annotation);
+    if (role == TrackRole.foreign) return pick(StyleRole.foreign);
+    return pick(StyleRole.chinese);
   }
 
   static bool _isLyric(String plain) {
@@ -118,7 +146,10 @@ class TextPipeline {
     // Keep only italic overrides inside {...}; drop other ASS tags.
     var cleaned = withNewlines.replaceAllMapped(_overrideBlock, (m) {
       final inner = m.group(0)!;
-      final kept = _keepItalic.allMatches(inner).map((e) => e.group(0)!).toList();
+      final kept = _keepItalic
+          .allMatches(inner)
+          .map((e) => e.group(0)!)
+          .toList();
       if (kept.isEmpty) return '';
       return '{${kept.join()}}';
     });
@@ -144,7 +175,10 @@ class TextPipeline {
     }
     // English + comma + English => add space after comma (skip digits like 1,000)
     while (_latinComma.hasMatch(s)) {
-      s = s.replaceAllMapped(_latinComma, (m) => '${m.group(1)}, ${m.group(2)}');
+      s = s.replaceAllMapped(
+        _latinComma,
+        (m) => '${m.group(1)}, ${m.group(2)}',
+      );
     }
     return s.replaceAll(RegExp(r' +'), ' ').trim();
   }

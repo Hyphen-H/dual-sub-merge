@@ -20,6 +20,7 @@ class StylesPage extends StatefulWidget {
 
 class _StylesPageState extends State<StylesPage> {
   late final TextEditingController _controller;
+  late int _baseResY;
 
   @override
   void initState() {
@@ -27,6 +28,7 @@ class _StylesPageState extends State<StylesPage> {
     _controller = TextEditingController(
       text: widget.options.styleLines.join('\n'),
     );
+    _baseResY = widget.options.styleBaseResY;
   }
 
   @override
@@ -42,6 +44,7 @@ class _StylesPageState extends State<StylesPage> {
         .where((e) => e.isNotEmpty)
         .toList();
     widget.options.styleLines = lines;
+    widget.options.styleBaseResY = _baseResY;
     widget.onChanged(widget.options);
     ScaffoldMessenger.of(
       context,
@@ -50,6 +53,13 @@ class _StylesPageState extends State<StylesPage> {
 
   void _restore() {
     _controller.text = StyleCatalog.defaultStyleLines.join('\n');
+    _baseResY = StyleCatalog.defaultBaseResY;
+    setState(() {});
+  }
+
+  void _applyJpReference() {
+    _controller.text = StyleCatalog.jpReferenceStyleLines.join('\n');
+    _baseResY = StyleCatalog.jpReferenceBaseResY;
     setState(() {});
   }
 
@@ -87,15 +97,24 @@ class _StylesPageState extends State<StylesPage> {
         .split('\n')
         .where((line) => line.trim().isNotEmpty)
         .length;
+    final effective = StyleCatalog.effectiveStyles(
+      styleLines: _controller.text.split('\n'),
+      baseResY: _baseResY,
+      mode: widget.options.processMode,
+    );
+    final names = StyleCatalog.namesFor(effective.lines);
     return AppPageScaffold(
       title: '字幕样式',
-      description: '管理输出 ASS 使用的 HDRipad 样式定义。',
+      description:
+          '管理输出 ASS 使用的 HDRipad 样式定义；关闭 HDR 时按同一套定义派生 SDR 样式。中日配对在使用内置默认样式时自动套用 Dial-CH / Dial-JP。',
       actions: [
         OutlinedButton.icon(
           onPressed: _importAss,
           icon: const Icon(Icons.file_upload_outlined, size: 17),
           label: const Text('从 ASS 导入'),
         ),
+        const SizedBox(width: 8),
+        TextButton(onPressed: _applyJpReference, child: const Text('中日参考预设')),
         const SizedBox(width: 8),
         TextButton(onPressed: _restore, child: const Text('恢复默认')),
         const SizedBox(width: 8),
@@ -117,26 +136,26 @@ class _StylesPageState extends State<StylesPage> {
                   child: Wrap(
                     spacing: 10,
                     runSpacing: 10,
-                    children: const [
+                    children: [
                       _StyleRoleBadge(
                         icon: Icons.translate,
                         label: '中文',
-                        name: StyleCatalog.chinese,
+                        name: names.chinese,
                       ),
                       _StyleRoleBadge(
                         icon: Icons.language,
                         label: '外文',
-                        name: StyleCatalog.foreign,
+                        name: names.foreign,
                       ),
                       _StyleRoleBadge(
                         icon: Icons.vertical_align_top,
                         label: '顶部注释',
-                        name: StyleCatalog.annotation,
+                        name: names.annotation,
                       ),
                       _StyleRoleBadge(
                         icon: Icons.music_note_outlined,
                         label: '歌词',
-                        name: StyleCatalog.lyric,
+                        name: names.lyric,
                       ),
                     ],
                   ),
@@ -152,9 +171,10 @@ class _StylesPageState extends State<StylesPage> {
                           padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
                           child: SectionHeader(
                             title: 'Style 定义',
-                            description: '每行一条标准 “Style:” 定义，保存后用于所有新输出文件。',
+                            description:
+                                '每行一条标准 “Style:” 定义，保存后用于所有新输出文件。取消顶部「HDR」时，名字里的 HDR 换成 SDR、正文亮度改为 255，其余字段照搬。字体/边框/边距按基准分辨率 $_baseResY 随输出分辨率等比缩放。',
                             trailing: StatusBadge(
-                              label: '$lineCount 条',
+                              label: '$lineCount 条 · 基准 $_baseResY',
                               foreground: UiTokens.muted,
                               background: const Color(0xFFF0F3F7),
                             ),
@@ -252,12 +272,10 @@ class _StylePickDialogState extends State<_StylePickDialog> {
   @override
   void initState() {
     super.initState();
-    _picked = widget.styles.map((e) => e.name).where((n) {
-      return n == StyleCatalog.chinese ||
-          n == StyleCatalog.foreign ||
-          n == StyleCatalog.annotation ||
-          n == StyleCatalog.lyric;
-    }).toSet();
+    _picked = widget.styles
+        .map((e) => e.name)
+        .where((name) => StyleCatalog.roleOf(name) != null)
+        .toSet();
     if (_picked.isEmpty) _picked.addAll(widget.styles.map((e) => e.name));
   }
 
@@ -272,7 +290,7 @@ class _StylePickDialogState extends State<_StylePickDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '已自动勾选与四套输出样式同名的项目，可在导入前调整。',
+              '已自动勾选与中文/外文/注释/歌词四类输出样式对应的项目，可在导入前调整。',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),

@@ -39,10 +39,18 @@ class BilingualSplit {
     }
 
     // Heuristic fallback: more Han → chinese
-    final hanA = RegExp(r'[\u4e00-\u9fff]').allMatches(TextPipeline.plainText(a)).length;
-    final hanB = RegExp(r'[\u4e00-\u9fff]').allMatches(TextPipeline.plainText(b)).length;
-    final latA = RegExp(r'[A-Za-z]{2,}').allMatches(TextPipeline.plainText(a)).length;
-    final latB = RegExp(r'[A-Za-z]{2,}').allMatches(TextPipeline.plainText(b)).length;
+    final hanA = RegExp(
+      r'[\u4e00-\u9fff]',
+    ).allMatches(TextPipeline.plainText(a)).length;
+    final hanB = RegExp(
+      r'[\u4e00-\u9fff]',
+    ).allMatches(TextPipeline.plainText(b)).length;
+    final latA = RegExp(
+      r'[A-Za-z]{2,}',
+    ).allMatches(TextPipeline.plainText(a)).length;
+    final latB = RegExp(
+      r'[A-Za-z]{2,}',
+    ).allMatches(TextPipeline.plainText(b)).length;
     if (hanA > 0 && latB > 0 && hanA >= hanB && latB >= latA) {
       return SplitPair(chinese: a, foreign: b);
     }
@@ -57,7 +65,10 @@ class BilingualSplit {
 
   /// Expand cues: dual lines → 2 cues (same timing); mono kept as single with role.
   /// Returns (outCues already role-tagged via temp style field unused — use SplitResult).
-  static BilingualSplitResult splitDocument(List<SubtitleCue> cues, {double minSplitRatio = 0.7}) {
+  static BilingualSplitResult splitDocument(
+    List<SubtitleCue> cues, {
+    double minSplitRatio = 0.7,
+  }) {
     final out = <({SubtitleCue cue, TrackRole role})>[];
     var dualHits = 0;
     var dualOk = 0;
@@ -81,7 +92,9 @@ class BilingualSplit {
           continue;
         }
         // hard break but not dual — try treat whole as one language
-        final role = LanguageFromName.scoreLine(TextPipeline.plainText(cue.rawText));
+        final role = LanguageFromName.scoreLine(
+          TextPipeline.plainText(cue.rawText),
+        );
         if (role == TrackRole.chinese || role == TrackRole.foreign) {
           mono++;
           out.add((cue: cue, role: role));
@@ -91,7 +104,9 @@ class BilingualSplit {
         continue;
       }
 
-      final role = LanguageFromName.scoreLine(TextPipeline.plainText(cue.rawText));
+      final role = LanguageFromName.scoreLine(
+        TextPipeline.plainText(cue.rawText),
+      );
       if (role == TrackRole.chinese || role == TrackRole.foreign) {
         mono++;
         out.add((cue: cue, role: role));
@@ -102,14 +117,18 @@ class BilingualSplit {
         final plain = TextPipeline.plainText(cue.rawText);
         final hasHan = RegExp(r'[\u4e00-\u9fff]').hasMatch(plain);
         mono++;
-        out.add((cue: cue, role: hasHan ? TrackRole.chinese : TrackRole.foreign));
+        out.add((
+          cue: cue,
+          role: hasHan ? TrackRole.chinese : TrackRole.foreign,
+        ));
       }
     }
 
     final ratio = dualHits == 0 ? 0.0 : dualOk / dualHits;
     final convertible = dualHits > 0 && ratio >= minSplitRatio && dualOk >= 3;
     // small files: allow if almost all dual lines split
-    final smallOk = dualHits > 0 && dualHits < 5 && dualOk == dualHits && dualOk >= 1;
+    final smallOk =
+        dualHits > 0 && dualHits < 5 && dualOk == dualHits && dualOk >= 1;
 
     return BilingualSplitResult(
       items: out,
@@ -122,7 +141,8 @@ class BilingualSplit {
     );
   }
 
-  static bool _hasHardBreak(String raw) => raw.contains(r'\N') || raw.contains('\n');
+  static bool _hasHardBreak(String raw) =>
+      raw.contains(r'\N') || raw.contains('\n');
 }
 
 class BilingualSplitResult {

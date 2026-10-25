@@ -1,9 +1,11 @@
 import 'dart:convert';
 
+import 'package:dual_sub_merge/models/extract_pair_mode.dart';
 import 'package:dual_sub_merge/services/extract/ffprobe_tracks.dart';
 import 'package:dual_sub_merge/services/extract/mkv_probe.dart';
 import 'package:dual_sub_merge/services/extract/track_info.dart';
 import 'package:dual_sub_merge/services/extract/track_selector.dart';
+import 'package:dual_sub_merge/services/language_from_name.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -170,5 +172,59 @@ void main() {
       ),
     ]);
     expect(traditionalOnly.chinese?.id, 2);
+  });
+
+  test('autoSelect follows the requested extract pair mode', () {
+    final tracks = [
+      SubtitleTrackInfo(
+        id: 1,
+        codec: 'S_TEXT/UTF8',
+        language: 'chi',
+        title: '简体中文',
+      ),
+      SubtitleTrackInfo(id: 2, codec: 'S_TEXT/UTF8', language: 'eng'),
+      SubtitleTrackInfo(
+        id: 3,
+        codec: 'S_TEXT/UTF8',
+        language: 'jpn',
+        title: '日本語',
+      ),
+    ];
+
+    final eng = TrackSelector.autoSelect(tracks, mode: ExtractPairMode.chsEng);
+    final jpn = TrackSelector.autoSelect(tracks, mode: ExtractPairMode.chsJpn);
+
+    expect(eng.chinese?.id, 1);
+    expect(eng.foreign?.id, 2);
+    expect(jpn.chinese?.id, 1);
+    expect(jpn.foreign?.id, 3);
+    expect(
+      TrackSelector.autoSelectedIds(tracks, mode: ExtractPairMode.chsEng),
+      {1, 2},
+    );
+    expect(
+      TrackSelector.autoSelectedIds(tracks, mode: ExtractPairMode.chsJpn),
+      {1, 3},
+    );
+  });
+
+  test('Japanese tracks are detected from language and title', () {
+    expect(
+      SubtitleTrackInfo(id: 1, codec: 'S_TEXT/UTF8', language: 'ja').isJapanese,
+      isTrue,
+    );
+    expect(
+      SubtitleTrackInfo(id: 2, codec: 'S_TEXT/UTF8', title: '日语').isJapanese,
+      isTrue,
+    );
+    expect(
+      SubtitleTrackInfo(
+        id: 3,
+        codec: 'S_TEXT/UTF8',
+        language: 'eng',
+      ).isJapanese,
+      isFalse,
+    );
+    expect(LanguageFromName.foreignOutputTag('ja'), 'jpn');
   });
 }

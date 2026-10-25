@@ -4,7 +4,10 @@ import 'text_pipeline.dart';
 class BilingualInlineDetector {
   /// Returns true if document looks like line-internal CN+EN dual subtitles
   /// (multi-line with \\N, or single-line mixed CN+EN).
-  static bool isBilingualInline(List<SubtitleCue> cues, {double threshold = 0.35}) {
+  static bool isBilingualInline(
+    List<SubtitleCue> cues, {
+    double threshold = 0.35,
+  }) {
     if (cues.isEmpty) return false;
     var sample = cues.length;
     if (sample > 80) sample = 80;
@@ -38,7 +41,10 @@ class BilingualInlineDetector {
   static bool _looksDualSplit(String raw) {
     final parts = raw.split(RegExp(r'\\N|\n'));
     if (parts.length < 2) return false;
-    final segs = parts.map(TextPipeline.plainText).where((e) => e.isNotEmpty).toList();
+    final segs = parts
+        .map(TextPipeline.plainText)
+        .where((e) => e.isNotEmpty)
+        .toList();
     if (segs.length < 2) return false;
     final a = segs.first;
     final b = segs[1];
@@ -46,11 +52,13 @@ class BilingualInlineDetector {
     final bHan = RegExp(r'[\u4e00-\u9fff]').hasMatch(b);
     final aLat = RegExp(r'[A-Za-z]{2,}').hasMatch(a);
     final bLat = RegExp(r'[A-Za-z]{2,}').hasMatch(b);
-    final dual = (aHan && bLat && !bHan) ||
+    final dual =
+        (aHan && bLat && !bHan) ||
         (bHan && aLat && !aHan) ||
         (aHan && bLat) ||
         (bHan && aLat);
-    final dualFn = RegExp(r'\\fn', caseSensitive: false).allMatches(raw).length >= 2;
+    final dualFn =
+        RegExp(r'\\fn', caseSensitive: false).allMatches(raw).length >= 2;
     return dual || (dualFn && (aHan || bHan) && (aLat || bLat));
   }
 
@@ -61,7 +69,8 @@ class BilingualInlineDetector {
 
     final han = RegExp(r'[\u4e00-\u9fff]').allMatches(plain).length;
     final latinWords = RegExp(r'[A-Za-z]{2,}').allMatches(plain).length;
-    final dualFn = RegExp(r'\\fn', caseSensitive: false).allMatches(raw).length >= 2;
+    final dualFn =
+        RegExp(r'\\fn', caseSensitive: false).allMatches(raw).length >= 2;
 
     // dual font overrides often used for single-line dual
     if (dualFn && han >= 2 && latinWords >= 2) return true;

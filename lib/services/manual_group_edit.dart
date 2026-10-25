@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:path/path.dart' as p;
 
 import '../models/match_group.dart';
@@ -7,7 +5,7 @@ import '../models/track_role.dart';
 import 'file_matcher.dart';
 import 'language_from_name.dart';
 
-/// Manual language / kind overrides for subtitle groups (session memory by path).
+/// Manual language role overrides for subtitle groups (session memory by path).
 class ManualGroupEdit {
   static String pathKey(String path) =>
       p.normalize(p.absolute(path)).toLowerCase();
@@ -37,38 +35,15 @@ class ManualGroupEdit {
     if (g.foreign != null) {
       rolesByPath[pathKey(g.foreign!.file.path)] = g.foreign!.role;
     }
-    if (g.bilingualSource != null &&
-        g.chinese == null &&
-        g.foreign == null) {
+    if (g.bilingualSource != null && g.chinese == null && g.foreign == null) {
       // bilingual source has no track role; leave existing role entry if any
-    }
-  }
-
-  static void recordKind(
-    Map<String, GroupKind> kindByPath,
-    MatchGroup g,
-    GroupKind kind,
-  ) {
-    for (final path in subtitlePaths(g)) {
-      kindByPath[pathKey(path)] = kind;
     }
   }
 
   static bool hasRoleOverride(
     Map<String, TrackRole> rolesByPath,
     String filePath,
-  ) =>
-      rolesByPath.containsKey(pathKey(filePath));
-
-  static bool hasKindOverride(
-    Map<String, GroupKind> kindByPath,
-    MatchGroup g,
-  ) {
-    for (final path in subtitlePaths(g)) {
-      if (kindByPath.containsKey(pathKey(path))) return true;
-    }
-    return false;
-  }
+  ) => rolesByPath.containsKey(pathKey(filePath));
 
   /// Set language role of [filePath] inside [g] and rebuild slots.
   static void setFileRole(MatchGroup g, String filePath, TrackRole role) {
@@ -89,7 +64,14 @@ class ManualGroupEdit {
       g.foreign = null;
       g.message = '';
       g.status = GroupStatus.ready;
-      _placeRef(g, SubtitleFileRef(file: src, role: role));
+      _placeRef(
+        g,
+        SubtitleFileRef(
+          file: src,
+          role: role,
+          languageTag: LanguageFromName.explicitOutputFileTag(src.path),
+        ),
+      );
       FileMatcher.reevaluate(g);
       return;
     }
@@ -107,8 +89,9 @@ class ManualGroupEdit {
     if (!found) return;
 
     if (role == TrackRole.chinese || role == TrackRole.foreign) {
-      final opposite =
-          role == TrackRole.chinese ? TrackRole.foreign : TrackRole.chinese;
+      final opposite = role == TrackRole.chinese
+          ? TrackRole.foreign
+          : TrackRole.chinese;
       for (final ref in refs) {
         if (pathKey(ref.file.path) != key && ref.role == role) {
           ref.role = opposite;
@@ -120,54 +103,12 @@ class ManualGroupEdit {
     FileMatcher.reevaluate(g);
   }
 
-  /// Switch processing kind between [GroupKind.pair] and [GroupKind.bilingualFile].
-  static void setKind(MatchGroup g, GroupKind kind) {
-    if (kind == GroupKind.videoOnly) return;
-    if (g.kind == kind) {
-      FileMatcher.reevaluate(g);
-      return;
-    }
-
-    if (kind == GroupKind.bilingualFile) {
-      final src = _pickBilingualSource(g);
-      if (src == null) return;
-      g.kind = GroupKind.bilingualFile;
-      g.bilingualSource = src;
-      g.chinese = null;
-      g.foreign = null;
-      g.status = GroupStatus.bilingualReady;
-      g.message = '可转换 \\N 双语（手动）';
-      return;
-    }
-
-    // pair
-    final src = g.bilingualSource;
-    final refs = <SubtitleFileRef>[];
-    if (src != null) {
-      var role = LanguageFromName.fromPath(src.path);
-      refs.add(SubtitleFileRef(file: src, role: role));
-    } else {
-      refs.addAll(_collectPairRefs(g));
-    }
-    g.kind = GroupKind.pair;
-    g.bilingualSource = null;
-    g.chinese = null;
-    g.foreign = null;
-    g.message = '';
-    g.status = GroupStatus.ready;
-    for (final ref in refs) {
-      _placeRef(g, ref);
-    }
-    FileMatcher.reevaluate(g);
-  }
-
-  /// Re-apply path-keyed overrides after a rescan.
+  /// Re-apply path-keyed role overrides after a rescan.
   static void applyOverrides(
     List<MatchGroup> groups, {
     required Map<String, TrackRole> rolesByPath,
-    required Map<String, GroupKind> kindByPath,
   }) {
-    if (rolesByPath.isEmpty && kindByPath.isEmpty) return;
+    if (rolesByPath.isEmpty) return;
 
     for (final g in groups) {
       if (g.kind == GroupKind.videoOnly &&
@@ -177,45 +118,18 @@ class ManualGroupEdit {
         continue;
       }
 
-      final kindOverride = _kindOverrideFor(g, kindByPath);
-
       if (g.kind == GroupKind.bilingualFile) {
         final src = g.bilingualSource;
-        if (src != null) {
-          final role = rolesByPath[pathKey(src.path)];
-          if (role != null &&
-              (kindOverride == null || kindOverride == GroupKind.pair)) {
-            setFileRole(g, src.path, role);
-          }
-        }
-        if (kindOverride == GroupKind.pair && g.kind != GroupKind.pair) {
-          setKind(g, GroupKind.pair);
-          _applyRolesToPair(g, rolesByPath);
-        } else if (kindOverride == GroupKind.bilingualFile) {
-          // already bilingual
-        }
+        if (src == null) continue;
+        final role = rolesByPath[pathKey(src.path)];
+        if (role != null) setFileRole(g, src.path, role);
         continue;
       }
 
       // pair (or video with subs)
       _applyRolesToPair(g, rolesByPath);
-      if (kindOverride == GroupKind.bilingualFile) {
-        setKind(g, GroupKind.bilingualFile);
-      } else {
-        FileMatcher.reevaluate(g);
-      }
+      FileMatcher.reevaluate(g);
     }
-  }
-
-  static GroupKind? _kindOverrideFor(
-    MatchGroup g,
-    Map<String, GroupKind> kindByPath,
-  ) {
-    for (final path in subtitlePaths(g)) {
-      final k = kindByPath[pathKey(path)];
-      if (k != null) return k;
-    }
-    return null;
   }
 
   static void _applyRolesToPair(
@@ -263,6 +177,7 @@ class ManualGroupEdit {
           file: ref.file,
           role: ref.role,
           fromExtract: ref.fromExtract,
+          languageTag: ref.languageTag,
         ),
       );
     }
@@ -275,6 +190,7 @@ class ManualGroupEdit {
   static void _rebuildPairSlots(MatchGroup g, List<SubtitleFileRef> refs) {
     g.chinese = null;
     g.foreign = null;
+    g.foreignTag = null;
     g.message = '';
     if (g.status == GroupStatus.conflict) {
       g.status = GroupStatus.ready;
@@ -296,6 +212,7 @@ class ManualGroupEdit {
     } else if (ref.role == TrackRole.foreign) {
       if (g.foreign == null) {
         g.foreign = ref;
+        g.foreignTag = ref.languageTag;
       } else {
         g.message =
             '多个外文字幕: ${p.basename(g.foreign!.file.path)}, ${p.basename(ref.file.path)}';
@@ -306,17 +223,11 @@ class ManualGroupEdit {
         g.chinese = ref..role = TrackRole.unknown;
       } else if (g.foreign == null) {
         g.foreign = ref..role = TrackRole.unknown;
+        g.foreignTag = ref.languageTag;
       } else {
         g.message = '无法识别语言: ${p.basename(ref.file.path)}';
         g.status = GroupStatus.conflict;
       }
     }
-  }
-
-  static File? _pickBilingualSource(MatchGroup g) {
-    if (g.bilingualSource != null) return g.bilingualSource;
-    if (g.chinese != null) return g.chinese!.file;
-    if (g.foreign != null) return g.foreign!.file;
-    return null;
   }
 }

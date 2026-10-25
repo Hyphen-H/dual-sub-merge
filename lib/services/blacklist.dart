@@ -27,7 +27,8 @@ class BlacklistFilter {
     return (regs, invalid);
   }
 
-  static List<String> validateRules(List<String> rules) => _compilePair(rules).$2;
+  static List<String> validateRules(List<String> rules) =>
+      _compilePair(rules).$2;
 
   (List<SubtitleCue>, int) filter(List<SubtitleCue> cues) {
     if (_regexes.isEmpty) return (cues, 0);
