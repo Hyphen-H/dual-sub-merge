@@ -25,10 +25,13 @@ class LanguageFromName {
 
   static final _foreignTokens = <String>{
     'eng',
+    'eng_dub',
+    'eng-dub',
     'en',
     'en-us',
     'en-gb',
     'english',
+    'dubtitle',
     'jpn',
     'ja',
     'jp',
@@ -113,7 +116,7 @@ class LanguageFromName {
     return RegExp(
       r'(?:^|[.\s_\-\[\]()])(?:'
       r'chs|cht|zh|cn|chi|zho|gb|big5|sc|tc|'
-      r'eng|en|en-us|en-gb|english|'
+      r'eng[_-]dub|dubtitle|eng|en|en-us|en-gb|english|'
       r'jpn|ja|jp|jap|kor|ko|'
       r'fre|fr|fra|ger|de|deu|spa|es|rus|ru|ita|it|por|pt|vie|vi|tha|th|ara|ar|'
       r'sdh|cc|extracted|'
@@ -184,6 +187,9 @@ class LanguageFromName {
     'en-us': 'eng',
     'en-gb': 'eng',
     'english': 'eng',
+    'eng_dub': 'eng_dub',
+    'eng-dub': 'eng_dub',
+    'dubtitle': 'eng_dub',
     'sdh': 'eng',
     'cc': 'eng',
     'kor': 'kor',
@@ -218,10 +224,18 @@ class LanguageFromName {
   /// tokens. Returns null when nothing is recognised.
   static String? explicitOutputFileTag(String path) {
     final base = p.basenameWithoutExtension(path).toLowerCase();
+    if (RegExp(r'(?:^|[.\s_\-\[\]()])eng[_-]dub$').hasMatch(base)) {
+      return 'eng_dub';
+    }
     final tokens = base
         .split(RegExp(r'[.\s_\-\[\]()]+'))
         .where((t) => t.isNotEmpty)
         .toList();
+    for (var i = 0; i + 1 < tokens.length; i++) {
+      if (tokens[i] == 'eng' && tokens[i + 1] == 'dub') {
+        return 'eng_dub';
+      }
+    }
     for (var i = tokens.length - 1; i >= 0; i--) {
       final tag = _langTagAliases[tokens[i]];
       if (tag != null) return tag;
@@ -274,7 +288,7 @@ class LanguageFromName {
       // Extracted tracks may be named like `...t4.[eng]` / `...t8.[chi]`.
       // Consume the optional track number together with the language suffix
       // so both files normalize to the same pairing prefix.
-      r'[.\s_\-]*(?:t\d+[.\s_\-]*)?[\[\(]?(chs|cht|zh|cn|chi|zho|gb|big5|sc|tc|eng|en|en-us|en-gb|english|jpn|ja|jp|jap|kor|ko|fre|fr|fra|ger|de|deu|spa|es|rus|ru|ita|it|por|pt|vie|vi|tha|th|ara|ar|sdh|cc|extracted|简体|繁体|繁中|简中|中字|中文|英文|外挂)+[\]\)]?$',
+      r'[.\s_\-]*(?:t\d+[.\s_\-]*)?[\[\(]?(chs|cht|zh|cn|chi|zho|gb|big5|sc|tc|eng[_-]dub|dubtitle|eng|en|en-us|en-gb|english|jpn|ja|jp|jap|kor|ko|fre|fr|fra|ger|de|deu|spa|es|rus|ru|ita|it|por|pt|vie|vi|tha|th|ara|ar|sdh|cc|extracted|简体|繁体|繁中|简中|中字|中文|英文|外挂)+[\]\)]?$',
       caseSensitive: false,
     );
     var prev = '';

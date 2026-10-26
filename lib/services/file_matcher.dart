@@ -198,7 +198,9 @@ class FileMatcher {
   /// our script header.
   static Future<bool> isSelfGeneratedOutput(File f) async {
     final lower = f.path.toLowerCase();
-    if (RegExp(r'\.chs\+[a-z]+\.ass$').hasMatch(lower)) return true;
+    if (RegExp(r'\.chs\+[a-z][a-z0-9_-]*\.ass$').hasMatch(lower)) {
+      return true;
+    }
     if (!f.path.toLowerCase().endsWith('.chs.ass')) return false;
     if (!f.existsSync()) return false;
     try {
@@ -226,6 +228,7 @@ class FileMatcher {
         g.status = GroupStatus.conflict;
       }
     } else if (ref.role == TrackRole.foreign) {
+      g.foreignCandidates.add(ref);
       if (g.foreign == null) {
         g.foreign = ref;
         g.foreignTag = ref.languageTag;
@@ -238,6 +241,7 @@ class FileMatcher {
       if (g.chinese == null) {
         g.chinese = ref..role = TrackRole.unknown;
       } else if (g.foreign == null) {
+        g.foreignCandidates.add(ref);
         g.foreign = ref..role = TrackRole.unknown;
         g.foreignTag = ref.languageTag;
       } else {

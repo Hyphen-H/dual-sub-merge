@@ -93,6 +93,95 @@ void main() {
     expect(File(p.join(root.path, 'Film.chs+jpn.ass')).existsSync(), isTrue);
   });
 
+  test('dubMerge writes .chs+eng_dub.ass for a Dubtitle pair', () async {
+    final root = await Directory.systemTemp.createTemp('dsm-dubmerge-');
+    addTearDown(() {
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    });
+
+    await File(
+      p.join(root.path, 'Show.chs.srt'),
+    ).writeAsString('1\n00:00:01,000 --> 00:00:02,000\n中文\n');
+    await File(
+      p.join(root.path, 'Show.eng_dub.srt'),
+    ).writeAsString('1\n00:00:01,000 --> 00:00:02,000\nDub English\n');
+
+    final svc = MergeService(
+      options: MergeOptions(
+        removeCredits: false,
+        processMode: ProcessMode.dubMerge,
+      ),
+    );
+    final r = await svc.run(root);
+
+    expect(r.successCount, 1);
+    expect(
+      File(p.join(root.path, 'Show.chs+eng_dub.ass')).existsSync(),
+      isTrue,
+    );
+  });
+
+  test('normal merge keeps Dubtitle separate from the new dub mode', () async {
+    final root = await Directory.systemTemp.createTemp('dsm-normal-dub-');
+    addTearDown(() {
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    });
+
+    await File(
+      p.join(root.path, 'Show.chs.srt'),
+    ).writeAsString('1\n00:00:01,000 --> 00:00:02,000\n中文\n');
+    await File(
+      p.join(root.path, 'Show.eng_dub.srt'),
+    ).writeAsString('1\n00:00:01,000 --> 00:00:02,000\nDub English\n');
+
+    final r = await MergeService(
+      options: MergeOptions(removeCredits: false),
+    ).run(root);
+
+    expect(r.successCount, 1);
+    expect(File(p.join(root.path, 'Show.chs+eng.ass')).existsSync(), isTrue);
+    expect(
+      File(p.join(root.path, 'Show.chs+eng_dub.ass')).existsSync(),
+      isFalse,
+    );
+  });
+
+  test('multiple pairing modes write each required combination', () async {
+    final root = await Directory.systemTemp.createTemp('dsm-multi-pair-');
+    addTearDown(() {
+      if (root.existsSync()) root.deleteSync(recursive: true);
+    });
+
+    for (final entry in {
+      'Show.chs.srt': '中文',
+      'Show.eng.srt': 'English',
+      'Show.eng_dub.srt': 'Dub English',
+      'Show.jpn.srt': '日本語',
+    }.entries) {
+      await File(
+        p.join(root.path, entry.key),
+      ).writeAsString('1\n00:00:01,000 --> 00:00:02,000\n${entry.value}\n');
+    }
+
+    final r = await MergeService(options: MergeOptions(removeCredits: false))
+        .runSelectedModes(
+          root,
+          modes: const [
+            ProcessMode.merge,
+            ProcessMode.dubMerge,
+            ProcessMode.jpMerge,
+          ],
+        );
+
+    expect(r.successCount, 3);
+    expect(File(p.join(root.path, 'Show.chs+eng.ass')).existsSync(), isTrue);
+    expect(
+      File(p.join(root.path, 'Show.chs+eng_dub.ass')).existsSync(),
+      isTrue,
+    );
+    expect(File(p.join(root.path, 'Show.chs+jpn.ass')).existsSync(), isTrue);
+  });
+
   test('jpMerge writes .chs+jpn.ass with Dial styles only', () async {
     final root = await Directory.systemTemp.createTemp('dsm-jpmerge-');
     addTearDown(() {
@@ -118,7 +207,7 @@ void main() {
     final out = File(p.join(root.path, 'Anime.S01E01.chs+jpn.ass'));
     expect(out.existsSync(), isTrue);
     final body = await out.readAsString();
-    expect(body, contains('Style: Dial-CH,HYQiHei-65S,72,'));
+    expect(body, contains('Style: Dial-CH,FZHei-B01,72,'));
     expect(body, contains('Style: Dial-JP,FOT-Rodin ProN B,48,'));
     expect(body, isNot(contains('Style: 中下HDRipad,')));
     final styles = body

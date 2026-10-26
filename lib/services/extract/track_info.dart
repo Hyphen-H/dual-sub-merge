@@ -173,9 +173,13 @@ class SubtitleTrackInfo {
   bool get isEnglish {
     final lang = language.toLowerCase();
     final t = title.toLowerCase();
+    if (isDubtitle) return true;
     if ({'eng', 'en', 'en-us', 'en-gb'}.contains(lang)) return true;
     return RegExp(r'english|\beng\b').hasMatch(t);
   }
+
+  bool get isDubtitle =>
+      RegExp(r'dub[\s_-]*title', caseSensitive: false).hasMatch(title);
 
   bool get isJapanese {
     final lang = _langNorm;

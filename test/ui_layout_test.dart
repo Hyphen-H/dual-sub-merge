@@ -99,6 +99,7 @@ void main() {
     expect(check('删除致谢').value, isTrue);
     expect(check('标记语言改名').value, isTrue);
     expect(check('HDR').value, isTrue);
+    expect(check(r'\an8 转上方注释').value, isFalse);
 
     await tester.tap(
       find.descendant(
@@ -111,6 +112,20 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('an8 annotation choice is restored from settings', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'an8AsAnnotation': true});
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    expect(
+      tester
+          .widget<OptionCheck>(find.widgetWithText(OptionCheck, r'\an8 转上方注释'))
+          .value,
+      isTrue,
+    );
+  });
+
   testWidgets('HDR choice is restored from settings', (tester) async {
     SharedPreferences.setMockInitialValues({'hdrSubtitle': false});
     await _pumpAt(tester, const HomePage(), const Size(1280, 720));
@@ -121,15 +136,54 @@ void main() {
     );
   });
 
-  testWidgets('top tabs drive the subtitle process mode', (tester) async {
+  testWidgets('pairing modes support single and multiple selection', (
+    tester,
+  ) async {
     await _pumpAt(tester, const HomePage(), const Size(1280, 720));
 
     final picker = find.byType(ProcessModePicker);
     expect(picker, findsOneWidget);
     expect(tester.widget<ProcessModePicker>(picker).mode, ProcessMode.merge);
-    expect(find.byType(TabBar), findsOneWidget);
     expect(find.text('开始中英配对'), findsOneWidget);
     expect(find.textContaining('中外单语字幕按文件名前缀配对'), findsNothing);
+    final segment = tester.widget<SegmentedButton<ProcessMode>>(
+      find.byType(SegmentedButton<ProcessMode>).first,
+    );
+    final scheme = Theme.of(
+      tester.element(find.byType(SegmentedButton<ProcessMode>).first),
+    ).colorScheme;
+    expect(
+      segment.style?.backgroundColor?.resolve({WidgetState.selected}),
+      scheme.primary,
+    );
+    expect(
+      segment.style?.foregroundColor?.resolve({WidgetState.selected}),
+      scheme.onPrimary,
+    );
+
+    await tester.tap(find.text('中英配'));
+    await tester.pumpAndSettle();
+
+    expect(tester.widget<ProcessModePicker>(picker).mode, ProcessMode.merge);
+    expect(tester.widget<ProcessModePicker>(picker).selectedPairModes, {
+      ProcessMode.merge,
+      ProcessMode.dubMerge,
+    });
+    expect(find.text('开始批量配对'), findsOneWidget);
+
+    await tester.tap(find.text('中英配'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<ProcessModePicker>(picker).selectedPairModes, {
+      ProcessMode.merge,
+    });
+
+    await tester.tap(find.text('中英配对'));
+    await tester.pumpAndSettle();
+    expect(tester.widget<ProcessModePicker>(picker).selectedPairModes, isEmpty);
+    expect(find.text('请选择配对模式'), findsOneWidget);
+
+    await tester.tap(find.text('中英配对'));
+    await tester.pumpAndSettle();
 
     await tester.tap(find.text('中文转换'));
     await tester.pumpAndSettle();
@@ -151,6 +205,20 @@ void main() {
     expect(find.text('开始中文化'), findsOneWidget);
   });
 
+  testWidgets('multiple subtitle pairing modes are restored', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'processMode': 'merge',
+      'selectedPairModes': ['merge', 'jpMerge'],
+    });
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    final picker = tester.widget<ProcessModePicker>(
+      find.byType(ProcessModePicker),
+    );
+    expect(picker.selectedPairModes, {ProcessMode.merge, ProcessMode.jpMerge});
+    expect(find.text('开始批量配对'), findsOneWidget);
+  });
+
   testWidgets('extract workspace and pair mode are restored', (tester) async {
     SharedPreferences.setMockInitialValues({
       'workspace': 'extract',
@@ -163,6 +231,37 @@ void main() {
       find.byType(ExtractPairModePicker),
     );
     expect(picker.mode, ExtractPairMode.chsJpn);
+  });
+
+  testWidgets('extract Dubtitle pair mode is restored', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'workspace': 'extract',
+      'extractPairMode': 'chsEngDub',
+    });
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    final picker = tester.widget<ExtractPairModePicker>(
+      find.byType(ExtractPairModePicker),
+    );
+    expect(picker.mode, ExtractPairMode.chsEngDub);
+    expect(find.text('中英配'), findsOneWidget);
+  });
+
+  testWidgets('multiple extract pair modes are restored', (tester) async {
+    SharedPreferences.setMockInitialValues({
+      'workspace': 'extract',
+      'extractPairMode': 'chsEng',
+      'selectedExtractPairModes': ['chsEng', 'chsJpn'],
+    });
+    await _pumpAt(tester, const HomePage(), const Size(1280, 720));
+
+    final picker = tester.widget<ExtractPairModePicker>(
+      find.byType(ExtractPairModePicker),
+    );
+    expect(picker.selectedModes, {
+      ExtractPairMode.chsEng,
+      ExtractPairMode.chsJpn,
+    });
   });
 
   testWidgets('legacy extract process mode opens the extract workspace', (

@@ -325,6 +325,11 @@ class MergeService {
     final mode = options.processMode;
     final hdrSubtitle = options.hdrSubtitle;
     final styles = StyleResolver.resolve(options);
+    if (sourceGroups != null) {
+      for (final group in sourceGroups) {
+        ProcessModeService.selectForeignForMode(group, mode);
+      }
+    }
 
     final outDir = outputDir ?? dir;
     if (!outDir.existsSync()) {
@@ -370,7 +375,8 @@ class MergeService {
     for (final g in groups) {
       if (!_isSelected(g)) continue;
       if (ProcessModeService.isReady(g, mode)) continue;
-      if (mode != ProcessMode.merge || g.kind == GroupKind.bilingualFile) {
+      if ((mode != ProcessMode.merge && mode != ProcessMode.dubMerge) ||
+          g.kind == GroupKind.bilingualFile) {
         continue;
       }
       if (onConflict != null) {
@@ -472,6 +478,13 @@ class MergeService {
 
       // —— bilingual file convert ——
       if (g.kind == GroupKind.bilingualFile && g.bilingualSource != null) {
+        if (mode == ProcessMode.dubMerge) {
+          fail++;
+          g.status = GroupStatus.conflict;
+          g.message = '中英配需要中文 + Dubtitle 字幕';
+          logs.add('[${g.outputBase}] 跳过: ${g.message}');
+          continue;
+        }
         try {
           final r = await converter.convertFile(
             source: g.bilingualSource!,
@@ -508,6 +521,14 @@ class MergeService {
         g.status = GroupStatus.missingForeign;
         g.message = '外文不是日文';
         logs.add('[${g.outputBase}] 跳过: 外文不是日文');
+        continue;
+      }
+      if (mode == ProcessMode.dubMerge &&
+          !ProcessModeService.hasDubtitleForeign(g)) {
+        fail++;
+        g.status = GroupStatus.missingForeign;
+        g.message = '外文不是 Dubtitle';
+        logs.add('[${g.outputBase}] 跳过: 外文不是 Dubtitle');
         continue;
       }
 
@@ -566,6 +587,7 @@ class MergeService {
               TrackRole.chinese,
               hdr: hdrSubtitle,
               names: styles.names,
+              treatAn8AsAnnotation: options.an8AsAnnotation,
             ),
           ),
           ...enCues.map(
@@ -574,20 +596,23 @@ class MergeService {
               TrackRole.foreign,
               hdr: hdrSubtitle,
               names: styles.names,
+              treatAn8AsAnnotation: options.an8AsAnnotation,
             ),
           ),
         ];
 
+        final detectedForeignTag =
+            g.foreignTag ??
+            LanguageFromName.explicitOutputFileTag(g.foreign!.file.path) ??
+            LanguageFromName.tagFromContent(enCues.map((c) => c.rawText)) ??
+            'eng';
         final foreignTag = mode == ProcessMode.jpMerge
             ? 'jpn'
-            : g.foreignTag ??
-                  LanguageFromName.explicitOutputFileTag(
-                    g.foreign!.file.path,
-                  ) ??
-                  LanguageFromName.tagFromContent(
-                    enCues.map((c) => c.rawText),
-                  ) ??
-                  'eng';
+            : mode == ProcessMode.dubMerge
+            ? 'eng_dub'
+            : detectedForeignTag == 'eng_dub'
+            ? 'eng'
+            : detectedForeignTag;
         final outName = '${g.outputBase}.chs+$foreignTag.ass';
         final outPath = p.join(outDir.path, outName);
         if (!options.overwrite && File(outPath).existsSync()) {
@@ -629,6 +654,69 @@ class MergeService {
       failCount: fail,
       removedCredits: removedCredits,
       skippedBilingual: skippedBilingual.toSet().toList(),
+      convertedBilingual: convertedBilingual,
+      convertedChinese: convertedChinese,
+      logs: logs,
+      outputs: outputs,
+    );
+  }
+
+  Future<MergeResult> runSelectedModes(
+    Directory dir, {
+    Directory? outputDir,
+    Iterable<MatchGroup>? sourceGroups,
+    required Iterable<ProcessMode> modes,
+  }) async {
+    final selected = modes.where((mode) => mode.isPairingMode).toList();
+    if (selected.length <= 1) {
+      if (selected.isNotEmpty) {
+        options.processMode = selected.first;
+        if (sourceGroups != null) {
+          ProcessModeService.apply(sourceGroups.toList(), selected.first);
+        }
+      }
+      return run(dir, outputDir: outputDir, sourceGroups: sourceGroups);
+    }
+
+    final originalMode = options.processMode;
+    var successCount = 0;
+    var failCount = 0;
+    var removedCredits = 0;
+    var convertedBilingual = 0;
+    var convertedChinese = 0;
+    final skippedBilingual = <String>[];
+    final logs = <String>[];
+    final outputs = <String>[];
+    try {
+      for (final mode in selected) {
+        options.processMode = mode;
+        if (sourceGroups != null) {
+          ProcessModeService.apply(sourceGroups.toList(), mode);
+        }
+        final result = await run(
+          dir,
+          outputDir: outputDir,
+          sourceGroups: sourceGroups,
+        );
+        successCount += result.successCount;
+        failCount += result.failCount;
+        removedCredits += result.removedCredits;
+        convertedBilingual += result.convertedBilingual;
+        convertedChinese += result.convertedChinese;
+        skippedBilingual.addAll(result.skippedBilingual);
+        logs
+          ..add('—— ${mode.label} ——')
+          ..addAll(result.logs);
+        outputs.addAll(result.outputs);
+      }
+    } finally {
+      options.processMode = originalMode;
+    }
+    return MergeResult(
+      successCount: successCount,
+      failCount: failCount,
+      removedCredits: removedCredits,
+      skippedBilingual: skippedBilingual,
       convertedBilingual: convertedBilingual,
       convertedChinese: convertedChinese,
       logs: logs,

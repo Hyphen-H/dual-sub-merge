@@ -107,6 +107,7 @@ class ChineseConvertService {
           TrackRole.chinese,
           hdr: options.hdrSubtitle,
           names: styles.names,
+          treatAn8AsAnnotation: options.an8AsAnnotation,
         ),
     ];
 
@@ -114,7 +115,10 @@ class ChineseConvertService {
         ? displayPrefix
         : LanguageFromName.displayPrefix(source.path);
     final cleanBase = base
-        .replaceAll(RegExp(r'\.chs\+eng$', caseSensitive: false), '')
+        .replaceAll(
+          RegExp(r'\.chs\+[a-z][a-z0-9_-]*$', caseSensitive: false),
+          '',
+        )
         .replaceAll(RegExp(r'\.chs$', caseSensitive: false), '')
         .replaceAll(RegExp(r'[.\s_\-]+$'), '');
     final finalName = '$cleanBase.chs.ass';

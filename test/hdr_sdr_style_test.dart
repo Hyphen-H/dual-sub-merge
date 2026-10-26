@@ -306,8 +306,9 @@ void main() {
         title: 't',
       );
       final body = await File(out).readAsString();
-      expect(body, contains('Style: Dial-CH,HYQiHei-65S,72,'));
+      expect(body, contains('Style: Dial-CH,FZHei-B01,72,'));
       expect(body, contains('Style: Dial-JP,FOT-Rodin ProN B,48,'));
+      expect(body, contains('Style: annotationHDRipad,'));
       expect(body, isNot(contains('Style: 中下HDRipad,')));
       final dialogueStyles = _dialogues(
         body,
@@ -336,8 +337,72 @@ void main() {
         title: 't',
       );
       final body = await File(out).readAsString();
-      expect(body, contains('Style: Dial-CH,HYQiHei-65S,72,&H00FFFFFF,'));
+      expect(body, contains('Style: Dial-CH,FZHei-B01,72,&H00FFFFFF,'));
       expect(_dialogues(body).single, contains(',Dial-CH,'));
+    });
+
+    test('jpMerge treats an8 as the normal role style', () async {
+      final options = MergeOptions(processMode: ProcessMode.jpMerge);
+      final styles = StyleResolver.resolve(options);
+      final chinese = TextPipeline.process(
+        SubtitleCue(startMs: 0, endMs: 1000, rawText: r'{\an8}你好'),
+        TrackRole.chinese,
+        names: styles.names,
+        treatAn8AsAnnotation: options.an8AsAnnotation,
+      );
+      final foreign = TextPipeline.process(
+        SubtitleCue(startMs: 0, endMs: 1000, rawText: r'{\an8}こんにちは'),
+        TrackRole.foreign,
+        names: styles.names,
+        treatAn8AsAnnotation: options.an8AsAnnotation,
+      );
+
+      expect(chinese.sourceHadAn8, isTrue);
+      expect(chinese.isAnnotation, isFalse);
+      expect(chinese.outputStyle, StyleCatalog.dialChinese);
+      expect(foreign.outputStyle, StyleCatalog.dialForeign);
+
+      final out = p.join(dir.path, 'jp-an8.ass');
+      await AssWriter.write(
+        path: out,
+        cues: [chinese, foreign],
+        options: options,
+        title: 't',
+      );
+      final body = await File(out).readAsString();
+      expect(body, contains('Style: annotationHDRipad,'));
+      expect(
+        _dialogues(body).map((line) => line.split(',')[3]),
+        containsAll([StyleCatalog.dialChinese, StyleCatalog.dialForeign]),
+      );
+    });
+
+    test('an8 annotation option uses the annotation style', () async {
+      final options = MergeOptions(
+        processMode: ProcessMode.jpMerge,
+        an8AsAnnotation: true,
+      );
+      final styles = StyleResolver.resolve(options);
+      final chinese = TextPipeline.process(
+        SubtitleCue(startMs: 0, endMs: 1000, rawText: r'{\an8}你好'),
+        TrackRole.chinese,
+        names: styles.names,
+        treatAn8AsAnnotation: options.an8AsAnnotation,
+      );
+
+      expect(chinese.sourceHadAn8, isTrue);
+      expect(chinese.isAnnotation, isTrue);
+      expect(chinese.outputStyle, StyleCatalog.annotation);
+
+      final out = p.join(dir.path, 'jp-an8-annotation.ass');
+      await AssWriter.write(
+        path: out,
+        cues: [chinese],
+        options: options,
+        title: 't',
+      );
+      final body = await File(out).readAsString();
+      expect(_dialogues(body).single, contains(',annotationHDRipad,'));
     });
   });
 
@@ -352,6 +417,10 @@ void main() {
       expect(r.names.annotation, StyleCatalog.annotation);
       expect(r.names.lyric, StyleCatalog.lyric);
       expect(r.lines.any((line) => line.startsWith('Style: Dial-CH,')), isTrue);
+      expect(
+        r.lines.any((line) => line.startsWith('Style: annotationHDRipad,')),
+        isTrue,
+      );
     });
 
     test('jpMerge leaves custom styles untouched', () {

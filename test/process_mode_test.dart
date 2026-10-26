@@ -39,6 +39,23 @@ MatchGroup _jpPair({bool tagFromContent = false}) => MatchGroup(
   status: GroupStatus.ready,
 );
 
+MatchGroup _dubPair() => MatchGroup(
+  prefix: 'dub',
+  displayPrefix: 'Dub',
+  chinese: SubtitleFileRef(
+    file: File(r'C:\tmp\Dub.chs.srt'),
+    role: TrackRole.chinese,
+  ),
+  foreign: SubtitleFileRef(
+    file: File(r'C:\tmp\Dub.eng_dub.srt'),
+    role: TrackRole.foreign,
+    languageTag: 'eng_dub',
+  ),
+  foreignTag: 'eng_dub',
+  kind: GroupKind.pair,
+  status: GroupStatus.ready,
+);
+
 MatchGroup _zhOnly() => MatchGroup(
   prefix: 'solo',
   displayPrefix: 'Solo',
@@ -180,6 +197,20 @@ void main() {
     expect(zh.status, GroupStatus.missingForeign);
     expect(zh.message, contains('日文'));
     expect(ProcessModeService.isReady(zh, ProcessMode.jpMerge), isFalse);
+  });
+
+  test('dubMerge accepts Dubtitle and rejects ordinary English', () {
+    final dub = _dubPair();
+    ProcessModeService.apply([dub], ProcessMode.dubMerge);
+    expect(dub.status, GroupStatus.ready);
+    expect(dub.statusOk, isTrue);
+    expect(ProcessModeService.isReady(dub, ProcessMode.dubMerge), isTrue);
+
+    final english = _pair();
+    ProcessModeService.apply([english], ProcessMode.dubMerge);
+    expect(english.statusOk, isFalse);
+    expect(english.message, contains('Dubtitle'));
+    expect(ProcessModeService.isReady(english, ProcessMode.dubMerge), isFalse);
   });
 
   test('jpMerge keeps convertible bilingual files usable', () {

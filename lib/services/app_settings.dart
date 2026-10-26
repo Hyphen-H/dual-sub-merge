@@ -16,10 +16,13 @@ class AppSettings {
   static const _kOverwrite = 'overwrite';
   static const _kTagLanguage = 'tagLanguageOnMerge';
   static const _kHdrSubtitle = 'hdrSubtitle';
+  static const _kAn8AsAnnotation = 'an8AsAnnotation';
   static const _kOutputDirMode = 'outputDirMode';
   static const _kWorkspace = 'workspace';
   static const _kProcessMode = 'processMode';
+  static const _kSelectedPairModes = 'selectedPairModes';
   static const _kExtractPairMode = 'extractPairMode';
+  static const _kSelectedExtractPairModes = 'selectedExtractPairModes';
   static const _kMkvDir = 'mkvToolNixDir';
   static const _kFfmpeg = 'ffmpegPath';
   static const _kFfprobe = 'ffprobePath';
@@ -45,6 +48,30 @@ class AppSettings {
     };
   }
 
+  static List<ProcessMode> _parsePairModes(
+    List<String>? raw,
+    ProcessMode fallback,
+  ) {
+    final parsed = (raw ?? const <String>[])
+        .map(ProcessModeInfo.parse)
+        .where((mode) => mode.isPairingMode)
+        .toSet()
+        .toList();
+    if (parsed.isNotEmpty) return parsed;
+    return [fallback.isPairingMode ? fallback : ProcessMode.merge];
+  }
+
+  static List<ExtractPairMode> _parseExtractPairModes(
+    List<String>? raw,
+    ExtractPairMode fallback,
+  ) {
+    final parsed = (raw ?? const <String>[])
+        .map(ExtractPairModeInfo.parse)
+        .toSet()
+        .toList();
+    return parsed.isNotEmpty ? parsed : [fallback];
+  }
+
   static Future<MergeOptions> loadOptions() async {
     final p = await SharedPreferences.getInstance();
     var styleLines = p.getStringList(_kStyles);
@@ -61,6 +88,7 @@ class AppSettings {
       }
     }
     final rawProcessMode = p.getString(_kProcessMode);
+    final parsedProcessMode = ProcessModeInfo.parse(rawProcessMode);
     final workspace = rawProcessMode == 'extract'
         ? AppWorkspace.extract
         : AppWorkspaceInfo.parse(p.getString(_kWorkspace));
@@ -73,11 +101,20 @@ class AppSettings {
       overwrite: p.getBool(_kOverwrite) ?? true,
       tagLanguageOnMerge: p.getBool(_kTagLanguage) ?? false,
       hdrSubtitle: p.getBool(_kHdrSubtitle) ?? true,
+      an8AsAnnotation: p.getBool(_kAn8AsAnnotation) ?? false,
       outputDirMode: _parseOutputMode(p.getString(_kOutputDirMode)),
       workspace: workspace,
-      processMode: ProcessModeInfo.parse(rawProcessMode),
+      processMode: parsedProcessMode,
+      selectedPairModes: _parsePairModes(
+        p.getStringList(_kSelectedPairModes),
+        parsedProcessMode,
+      ),
       extractPairMode: ExtractPairModeInfo.parse(
         p.getString(_kExtractPairMode),
+      ),
+      selectedExtractPairModes: _parseExtractPairModes(
+        p.getStringList(_kSelectedExtractPairModes),
+        ExtractPairModeInfo.parse(p.getString(_kExtractPairMode)),
       ),
       mkvToolNixDir: p.getString(_kMkvDir) ?? '',
       ffmpegPath: p.getString(_kFfmpeg) ?? '',
@@ -98,12 +135,21 @@ class AppSettings {
     await p.setBool(_kOverwrite, o.overwrite);
     await p.setBool(_kTagLanguage, o.tagLanguageOnMerge);
     await p.setBool(_kHdrSubtitle, o.hdrSubtitle);
+    await p.setBool(_kAn8AsAnnotation, o.an8AsAnnotation);
     await p.setString(_kOutputDirMode, _encodeOutputMode(o.outputDirMode));
     await p.setString(_kWorkspace, AppWorkspaceInfo.encode(o.workspace));
     await p.setString(_kProcessMode, ProcessModeInfo.encode(o.processMode));
+    await p.setStringList(
+      _kSelectedPairModes,
+      o.selectedPairModes.map(ProcessModeInfo.encode).toList(),
+    );
     await p.setString(
       _kExtractPairMode,
       ExtractPairModeInfo.encode(o.extractPairMode),
+    );
+    await p.setStringList(
+      _kSelectedExtractPairModes,
+      o.selectedExtractPairModes.map(ExtractPairModeInfo.encode).toList(),
     );
     await p.setString(_kMkvDir, o.mkvToolNixDir);
     await p.setString(_kFfmpeg, o.ffmpegPath);

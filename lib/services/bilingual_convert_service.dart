@@ -76,6 +76,7 @@ class BilingualConvertService {
           item.role,
           hdr: options.hdrSubtitle,
           names: styles.names,
+          treatAn8AsAnnotation: options.an8AsAnnotation,
         ),
     ];
 
@@ -91,11 +92,20 @@ class BilingualConvertService {
     if (options.processMode == ProcessMode.jpMerge && detectedTag != 'jpn') {
       return BilingualConvertResult(ok: false, message: '外文不是日文');
     }
+    if (options.processMode == ProcessMode.dubMerge &&
+        detectedTag != 'eng_dub') {
+      return BilingualConvertResult(ok: false, message: '外文不是 Dubtitle');
+    }
     final foreignTag = options.processMode == ProcessMode.jpMerge
         ? 'jpn'
+        : options.processMode == ProcessMode.dubMerge
+        ? 'eng_dub'
         : detectedTag;
     final cleanBase = base
-        .replaceAll(RegExp(r'\.chs\+[a-z]+$', caseSensitive: false), '')
+        .replaceAll(
+          RegExp(r'\.chs\+[a-z][a-z0-9_-]*$', caseSensitive: false),
+          '',
+        )
         .replaceAll(RegExp(r'[.\s_\-]+$'), '');
     final finalName = '$cleanBase.chs+$foreignTag.ass';
     final outPath = p.join(outDir.path, finalName);

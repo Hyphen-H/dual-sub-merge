@@ -20,6 +20,10 @@ void main() {
       );
       expect(LanguageFromName.hasTrailingLanguageTag(r'a\Show.en.srt'), isTrue);
       expect(LanguageFromName.hasTrailingLanguageTag(r'a\Show.ja.srt'), isTrue);
+      expect(
+        LanguageFromName.hasTrailingLanguageTag(r'a\Show.eng_dub.srt'),
+        isTrue,
+      );
     });
 
     test('untagged names', () {

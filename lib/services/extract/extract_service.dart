@@ -165,6 +165,8 @@ class ExtractService {
     File? enFile;
     final foreignTag = selected.foreign == null
         ? 'eng'
+        : selected.foreign!.isDubtitle
+        ? 'eng_dub'
         : selected.foreign!.isJapanese
         ? 'jpn'
         : LanguageFromName.foreignOutputTag(selected.foreign!.language);
@@ -242,6 +244,7 @@ class ExtractService {
 
   String _outputTag(SubtitleTrackInfo track) {
     if (track.isChinese) return 'chs';
+    if (track.isDubtitle) return 'eng_dub';
     if (track.isEnglish) return 'eng';
     if (track.isJapanese) return 'jpn';
     final language = track.language.trim().toLowerCase();

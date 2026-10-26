@@ -47,6 +47,7 @@ class MatchGroup {
     this.displayPrefix,
     this.chinese,
     this.foreign,
+    List<SubtitleFileRef>? foreignCandidates,
     this.foreignTag,
     this.video,
     this.bilingualSource,
@@ -55,7 +56,9 @@ class MatchGroup {
     this.message = '',
     this.outputPath,
     this.selected = true,
-  });
+  }) : foreignCandidates = List<SubtitleFileRef>.from(
+         foreignCandidates ?? (foreign == null ? const [] : [foreign]),
+       );
 
   /// Lowercase match key.
   final String prefix;
@@ -64,6 +67,9 @@ class MatchGroup {
   String? displayPrefix;
   SubtitleFileRef? chinese;
   SubtitleFileRef? foreign;
+
+  /// All foreign subtitle candidates sharing this prefix.
+  final List<SubtitleFileRef> foreignCandidates;
 
   /// Language tag of the foreign side, resolved during scanning.
   String? foreignTag;

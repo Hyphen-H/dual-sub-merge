@@ -23,6 +23,31 @@ class UiTokens {
   static const warningBg = Color(0xFFFFF4DE);
 }
 
+ButtonStyle _modeSegmentStyle(BuildContext context) {
+  final scheme = Theme.of(context).colorScheme;
+  return ButtonStyle(
+    backgroundColor: WidgetStateProperty.resolveWith((states) {
+      return states.contains(WidgetState.selected)
+          ? scheme.primary
+          : scheme.surface;
+    }),
+    foregroundColor: WidgetStateProperty.resolveWith((states) {
+      return states.contains(WidgetState.selected)
+          ? scheme.onPrimary
+          : scheme.onSurfaceVariant;
+    }),
+    side: WidgetStateProperty.resolveWith((states) {
+      return BorderSide(
+        color: states.contains(WidgetState.selected)
+            ? scheme.primary
+            : scheme.outlineVariant,
+      );
+    }),
+    visualDensity: VisualDensity.compact,
+    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+  );
+}
+
 class AppSurface extends StatelessWidget {
   const AppSurface({
     super.key,
@@ -347,76 +372,66 @@ class OptionCheck extends StatelessWidget {
   }
 }
 
-class ProcessModePicker extends StatefulWidget {
+class ProcessModePicker extends StatelessWidget {
   const ProcessModePicker({
     super.key,
     required this.mode,
-    required this.onChanged,
+    required this.selectedPairModes,
+    required this.onPairModesChanged,
+    required this.onExclusiveModeChanged,
     this.enabled = true,
   });
 
   final ProcessMode mode;
-  final ValueChanged<ProcessMode> onChanged;
+  final Set<ProcessMode> selectedPairModes;
+  final ValueChanged<Set<ProcessMode>> onPairModesChanged;
+  final ValueChanged<ProcessMode> onExclusiveModeChanged;
   final bool enabled;
 
   @override
-  State<ProcessModePicker> createState() => _ProcessModePickerState();
-}
-
-class _ProcessModePickerState extends State<ProcessModePicker>
-    with SingleTickerProviderStateMixin {
-  late final TabController _controller;
-
-  int _indexOf(ProcessMode mode) => ProcessMode.values.indexOf(mode);
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TabController(
-      length: ProcessMode.values.length,
-      initialIndex: _indexOf(widget.mode),
-      vsync: this,
-    );
-  }
-
-  @override
-  void didUpdateWidget(covariant ProcessModePicker oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    final index = _indexOf(widget.mode);
-    if (_controller.index != index) _controller.index = index;
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     return Semantics(
       container: true,
       label: '字幕处理方式',
       child: IgnorePointer(
-        ignoring: !widget.enabled,
-        child: TabBar(
-          controller: _controller,
-          isScrollable: true,
-          onTap: (index) => widget.onChanged(ProcessMode.values[index]),
-          labelColor: scheme.primary,
-          unselectedLabelColor: scheme.onSurfaceVariant,
-          indicatorColor: scheme.primary,
-          indicatorWeight: 2,
-          indicatorSize: TabBarIndicatorSize.label,
-          dividerColor: UiTokens.border,
-          labelStyle: Theme.of(
-            context,
-          ).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w600),
-          unselectedLabelStyle: Theme.of(context).textTheme.labelLarge,
-          labelPadding: const EdgeInsets.symmetric(horizontal: 16),
-          padding: EdgeInsets.zero,
-          tabs: [for (final mode in ProcessMode.values) Tab(text: mode.label)],
+        ignoring: !enabled,
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            SegmentedButton<ProcessMode>(
+              showSelectedIcon: false,
+              multiSelectionEnabled: true,
+              emptySelectionAllowed: true,
+              style: _modeSegmentStyle(context),
+              segments: const [
+                ButtonSegment(value: ProcessMode.merge, label: Text('中英配对')),
+                ButtonSegment(value: ProcessMode.dubMerge, label: Text('中英配')),
+                ButtonSegment(value: ProcessMode.jpMerge, label: Text('中日配对')),
+              ],
+              selected: mode.isPairingMode ? selectedPairModes : const {},
+              onSelectionChanged: onPairModesChanged,
+            ),
+            SegmentedButton<ProcessMode>(
+              showSelectedIcon: false,
+              emptySelectionAllowed: true,
+              style: _modeSegmentStyle(context),
+              segments: const [
+                ButtonSegment(
+                  value: ProcessMode.styleConvert,
+                  label: Text('样式转换'),
+                ),
+                ButtonSegment(
+                  value: ProcessMode.chineseConvert,
+                  label: Text('中文转换'),
+                ),
+              ],
+              selected: mode.isPairingMode ? const {} : {mode},
+              onSelectionChanged: (values) {
+                onExclusiveModeChanged(values.first);
+              },
+            ),
+          ],
         ),
       ),
     );
@@ -426,36 +441,39 @@ class _ProcessModePickerState extends State<ProcessModePicker>
 class ExtractPairModePicker extends StatelessWidget {
   const ExtractPairModePicker({
     super.key,
-    required this.mode,
+    required this.selectedModes,
     required this.onChanged,
     this.enabled = true,
   });
 
-  final ExtractPairMode mode;
-  final ValueChanged<ExtractPairMode> onChanged;
+  final Set<ExtractPairMode> selectedModes;
+  final ValueChanged<Set<ExtractPairMode>> onChanged;
   final bool enabled;
+
+  ExtractPairMode get mode =>
+      selectedModes.isEmpty ? ExtractPairMode.chsEng : selectedModes.first;
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: mode.tooltip,
+      message: selectedModes.isEmpty
+          ? '请选择语言对'
+          : selectedModes.map((mode) => mode.tooltip).join('\n'),
       waitDuration: const Duration(milliseconds: 450),
       child: Semantics(
         label: '抽轨语言',
         child: SegmentedButton<ExtractPairMode>(
           showSelectedIcon: false,
-          style: const ButtonStyle(
-            visualDensity: VisualDensity.compact,
-            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-          ),
+          multiSelectionEnabled: true,
+          emptySelectionAllowed: true,
+          style: _modeSegmentStyle(context),
           segments: const [
             ButtonSegment(value: ExtractPairMode.chsEng, label: Text('中英')),
+            ButtonSegment(value: ExtractPairMode.chsEngDub, label: Text('中英配')),
             ButtonSegment(value: ExtractPairMode.chsJpn, label: Text('中日')),
           ],
-          selected: {mode},
-          onSelectionChanged: enabled
-              ? (values) => onChanged(values.first)
-              : null,
+          selected: selectedModes,
+          onSelectionChanged: enabled ? (values) => onChanged(values) : null,
         ),
       ),
     );

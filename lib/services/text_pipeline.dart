@@ -71,9 +71,11 @@ class TextPipeline {
     TrackRole role, {
     bool hdr = true,
     StyleNames? names,
+    bool treatAn8AsAnnotation = true,
   }) {
     final raw = cue.rawText;
     final hadAn8 = _an8.hasMatch(raw);
+    final isAnnotation = hadAn8 && treatAn8AsAnnotation;
     final plain = plainText(raw);
     final isLyric = _isLyric(plain);
     final cleaned = _cleanKeepItalic(_htmlItalicToAss(raw));
@@ -81,7 +83,7 @@ class TextPipeline {
     final style = resolveStyle(
       role: role,
       isLyric: isLyric,
-      isAnnotation: hadAn8,
+      isAnnotation: isAnnotation,
       hdr: hdr,
       names: names,
     );
@@ -89,7 +91,7 @@ class TextPipeline {
     return cue.copyWith(
       sourceHadAn8: hadAn8,
       isLyric: isLyric,
-      isAnnotation: hadAn8,
+      isAnnotation: isAnnotation,
       text: normalized,
       outputStyle: style,
     );

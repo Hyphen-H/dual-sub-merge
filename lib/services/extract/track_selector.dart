@@ -42,19 +42,42 @@ class TrackSelector {
     };
   }
 
+  static Set<int> autoSelectedIdsForModes(
+    List<SubtitleTrackInfo> tracks,
+    Iterable<ExtractPairMode> modes,
+  ) {
+    final selected = <int>{};
+    for (final mode in modes) {
+      selected.addAll(autoSelectedIds(tracks, mode: mode));
+    }
+    return selected;
+  }
+
   static SubtitleTrackInfo? _pickForeign(
     List<SubtitleTrackInfo> text,
     ExtractPairMode mode,
   ) {
     final target = switch (mode) {
       ExtractPairMode.chsEng =>
-        _best(text.where((t) => t.isEnglish && !t.isSdh).toList()) ??
-            _best(text.where((t) => t.isEnglish).toList()) ??
-            _best(text.where((t) => t.isSdh && !t.isChinese).toList()),
+        _best(
+              text
+                  .where((t) => t.isEnglish && !t.isDubtitle && !t.isSdh)
+                  .toList(),
+            ) ??
+            _best(text.where((t) => t.isEnglish && !t.isDubtitle).toList()) ??
+            _best(
+              text
+                  .where((t) => t.isSdh && !t.isChinese && !t.isDubtitle)
+                  .toList(),
+            ),
+      ExtractPairMode.chsEngDub =>
+        _best(text.where((t) => t.isDubtitle && !t.isSdh).toList()) ??
+            _best(text.where((t) => t.isDubtitle).toList()),
       ExtractPairMode.chsJpn =>
         _best(text.where((t) => t.isJapanese && !t.isSdh).toList()) ??
             _best(text.where((t) => t.isJapanese).toList()),
     };
+    if (mode == ExtractPairMode.chsEngDub) return target;
     // Keep extraction useful when the requested language is absent.
     return target ?? _best(text.where((t) => !t.isChinese).toList());
   }

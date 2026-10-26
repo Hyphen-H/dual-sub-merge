@@ -37,10 +37,13 @@ class MergeOptions {
     this.overwrite = true,
     this.tagLanguageOnMerge = false,
     this.hdrSubtitle = true,
+    this.an8AsAnnotation = false,
     this.outputDirMode = OutputDirMode.mergedSubdir,
     this.workspace = AppWorkspace.subtitles,
-    this.processMode = ProcessMode.merge,
+    ProcessMode processMode = ProcessMode.merge,
+    List<ProcessMode>? selectedPairModes,
     this.extractPairMode = ExtractPairMode.chsEng,
+    List<ExtractPairMode>? selectedExtractPairModes,
     this.mkvToolNixDir = '',
     this.ffmpegPath = '',
     this.ffprobePath = '',
@@ -48,6 +51,13 @@ class MergeOptions {
     List<String>? styleLines,
   }) : blacklistRules =
            blacklistRules ?? List<String>.from(defaultBlacklistRules),
+       processMode = processMode,
+       selectedPairModes = List<ProcessMode>.from(
+         selectedPairModes ?? [processMode],
+       ),
+       selectedExtractPairModes = List<ExtractPairMode>.from(
+         selectedExtractPairModes ?? [extractPairMode],
+       ),
        styleLines =
            styleLines ?? List<String>.from(StyleCatalog.defaultStyleLines);
 
@@ -69,6 +79,9 @@ class MergeOptions {
 
   /// Emit HDRipad styles; when false the SDR variants are derived instead.
   bool hdrSubtitle;
+
+  /// Convert ASS `\an8` overrides to the upper annotation style.
+  bool an8AsAnnotation;
   OutputDirMode outputDirMode;
 
   /// Active sidebar workspace.
@@ -77,8 +90,14 @@ class MergeOptions {
   /// Subtitle processing mode used inside the subtitle workspace.
   ProcessMode processMode;
 
+  /// Selected subtitle pairing modes. One item is the normal single-mode case.
+  List<ProcessMode> selectedPairModes;
+
   /// Default language pair used when probing video subtitle tracks.
   ExtractPairMode extractPairMode;
+
+  /// Selected video extraction language pairs.
+  List<ExtractPairMode> selectedExtractPairModes;
   String mkvToolNixDir;
   String ffmpegPath;
   String ffprobePath;

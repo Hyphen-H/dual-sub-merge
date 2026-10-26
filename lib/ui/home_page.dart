@@ -66,6 +66,12 @@ class _HomePageState extends State<HomePage> {
 
   bool get _isExtractMode => _workspace == AppWorkspace.extract;
 
+  Set<ProcessMode> get _selectedPairModes =>
+      _options.selectedPairModes.where((mode) => mode.isPairingMode).toSet();
+
+  Set<ExtractPairMode> get _selectedExtractPairModes =>
+      _options.selectedExtractPairModes.toSet();
+
   List<MatchGroup> get _subtitleGroups => _groups
       .where(
         (g) =>
@@ -188,7 +194,7 @@ class _HomePageState extends State<HomePage> {
       }
       if (skippedOutputs > 0) {
         _log.writeln(
-          '[扫描] 跳过 $skippedOutputs 个已合并成品（.chs+eng/jpn.ass / .chs.ass）',
+          '[扫描] 跳过 $skippedOutputs 个已合并成品（.chs+eng/jpn/eng_dub.ass / .chs.ass）',
         );
       }
 
@@ -197,7 +203,11 @@ class _HomePageState extends State<HomePage> {
         extractSubdir: _options.extractSubdir,
       );
       ManualGroupEdit.applyOverrides(all, rolesByPath: _manualRoles);
-      ProcessModeService.apply(all, _options.processMode);
+      if (_options.processMode.isPairingMode) {
+        ProcessModeService.applySelected(all, _selectedPairModes);
+      } else {
+        ProcessModeService.apply(all, _options.processMode);
+      }
       for (final g in all) {
         // default: all selected; preserve prior choice on refresh
         if (keepSelection && prevSelected.containsKey(g.prefix)) {
@@ -221,7 +231,7 @@ class _HomePageState extends State<HomePage> {
               duration: const Duration(seconds: 6),
               content: Text(
                 '这 $skippedOutputs 个文件都是已合并的成品'
-                '（.chs+eng/jpn.ass / .chs.ass），已跳过。请选择原始字幕所在文件夹。',
+                '（.chs+eng/jpn/eng_dub.ass / .chs.ass），已跳过。请选择原始字幕所在文件夹。',
               ),
             ),
           );
@@ -287,7 +297,7 @@ class _HomePageState extends State<HomePage> {
         tools,
         _options,
       ).probeTracks(File(path));
-      final selectedIds = _autoSelectedIds(tracks, _options.extractPairMode);
+      final selectedIds = _autoSelectedIds(tracks, _selectedExtractPairModes);
       if (!mounted) return;
       setState(() {
         _videoTrackStates[path] = _VideoTrackState.ready(
@@ -305,8 +315,8 @@ class _HomePageState extends State<HomePage> {
 
   Set<int> _autoSelectedIds(
     List<SubtitleTrackInfo> tracks,
-    ExtractPairMode mode,
-  ) => TrackSelector.autoSelectedIds(tracks, mode: mode);
+    Set<ExtractPairMode> modes,
+  ) => TrackSelector.autoSelectedIdsForModes(tracks, modes);
 
   Future<void> _toggleVideoExpanded(MatchGroup group) async {
     final path = group.video?.path;
@@ -348,7 +358,7 @@ class _HomePageState extends State<HomePage> {
         ..clear()
         ..addAll(
           selected
-              ? _autoSelectedIds(state.tracks, _options.extractPairMode)
+              ? _autoSelectedIds(state.tracks, _selectedExtractPairModes)
               : const <int>[],
         );
     });
@@ -434,7 +444,7 @@ class _HomePageState extends State<HomePage> {
         }
         state.selectedIds
           ..clear()
-          ..addAll(_autoSelectedIds(state.tracks, _options.extractPairMode));
+          ..addAll(_autoSelectedIds(state.tracks, _selectedExtractPairModes));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -455,13 +465,31 @@ class _HomePageState extends State<HomePage> {
     ManualGroupEdit.setFileRole(group, filePath, role);
     ManualGroupEdit.recordRole(_manualRoles, filePath, role);
     ManualGroupEdit.syncRolesFromGroup(_manualRoles, group);
-    ProcessModeService.apply([group], _options.processMode);
+    if (_options.processMode.isPairingMode) {
+      ProcessModeService.applySelected([group], _selectedPairModes);
+    } else {
+      ProcessModeService.apply([group], _options.processMode);
+    }
     setState(() {});
   }
 
   Future<void> _setProcessMode(ProcessMode mode) async {
-    setState(() => _options.processMode = mode);
-    ProcessModeService.apply(_groups, mode);
+    if (mode.isPairingMode) {
+      await _setPairModes({mode});
+    } else {
+      setState(() => _options.processMode = mode);
+      ProcessModeService.apply(_groups, mode);
+      await _persist();
+    }
+  }
+
+  Future<void> _setPairModes(Set<ProcessMode> modes) async {
+    final selected = modes.where((mode) => mode.isPairingMode).toList();
+    setState(() {
+      _options.selectedPairModes = selected;
+      if (selected.isNotEmpty) _options.processMode = selected.first;
+      ProcessModeService.applySelected(_groups, selected);
+    });
     await _persist();
   }
 
@@ -470,25 +498,33 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _workspace = workspace;
       _showIssuesOnly = false;
-      if (workspace == AppWorkspace.subtitles) {
-        ProcessModeService.apply(_groups, _options.processMode);
-      }
+      if (workspace == AppWorkspace.subtitles) _applyCurrentSubtitleModes();
     });
     await _persist();
   }
 
-  Future<void> _setExtractPairMode(ExtractPairMode mode) async {
-    if (_options.extractPairMode == mode) return;
-    final previous = _options.extractPairMode;
+  void _applyCurrentSubtitleModes() {
+    if (_options.processMode.isPairingMode) {
+      ProcessModeService.applySelected(_groups, _selectedPairModes);
+    } else {
+      ProcessModeService.apply(_groups, _options.processMode);
+    }
+  }
+
+  Future<void> _setExtractPairModes(Set<ExtractPairMode> modes) async {
+    final previous = _selectedExtractPairModes;
     setState(() {
-      _options.extractPairMode = mode;
+      _options.selectedExtractPairModes = modes.toList();
+      _options.extractPairMode = modes.isEmpty
+          ? ExtractPairMode.chsEng
+          : modes.first;
       for (final state in _videoTrackStates.values) {
         if (!state.probed || state.loading || state.error != null) continue;
         final previousAuto = _autoSelectedIds(state.tracks, previous);
         if (!setEquals(state.selectedIds, previousAuto)) continue;
         state.selectedIds
           ..clear()
-          ..addAll(_autoSelectedIds(state.tracks, mode));
+          ..addAll(_autoSelectedIds(state.tracks, modes));
       }
     });
     await _persist();
@@ -558,6 +594,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _extractVideos() async {
+    if (_selectedExtractPairModes.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请至少选择一种抽轨语言对')));
+      return;
+    }
     if (_inputDir == null && _inputFiles.isEmpty) {
       ScaffoldMessenger.of(
         context,
@@ -662,6 +704,12 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _run() async {
+    if (_options.processMode.isPairingMode && _selectedPairModes.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('请至少选择一种配对模式')));
+      return;
+    }
     if (_inputDir == null) {
       ScaffoldMessenger.of(
         context,
@@ -690,13 +738,18 @@ class _HomePageState extends State<HomePage> {
         .list[_resIndex.clamp(0, ResolutionPreset.list.length - 1)];
     _options.playResX = res.width;
     _options.playResY = res.height;
-    ProcessModeService.apply(_subtitleGroups, _options.processMode);
+    _applyCurrentSubtitleModes();
     await _persist();
 
     final mode = _options.processMode;
+    final selectedModes = mode.isPairingMode
+        ? _selectedPairModes.toList()
+        : [mode];
     setState(() {
       _busy = true;
-      _progress = '${mode.workingLabel}中…';
+      _progress = selectedModes.length > 1
+          ? '多模式配对中…'
+          : '${mode.workingLabel}中…';
       _progressCurrent = 0;
       _progressTotal = 0;
     });
@@ -716,20 +769,22 @@ class _HomePageState extends State<HomePage> {
     );
 
     try {
-      final result = await service.run(
+      final result = await service.runSelectedModes(
         Directory(_inputDir!),
         outputDir: Directory(outPath),
         sourceGroups: sourceGroups,
+        modes: selectedModes,
       );
+      final modeLabel = selectedModes.map((m) => m.label).join(' / ');
       _log
-        ..writeln('—— 完成（${mode.label}）——')
+        ..writeln('—— 完成（$modeLabel）——')
         ..writeln('成功 ${result.successCount} / 失败 ${result.failCount}')
         ..writeln('双语转换: ${result.convertedBilingual}')
         ..writeln('中文转换: ${result.convertedChinese}')
         ..writeln('删除致谢行: ${result.removedCredits}')
         ..writeln(result.logs.join('\n'));
       if (result.skippedBilingual.isNotEmpty) {
-        _log.writeln('${mode.workingLabel}无法处理已跳过:');
+        _log.writeln('所选模式无法处理已跳过:');
         for (final s in result.skippedBilingual) {
           _log.writeln('  - $s');
         }
@@ -737,7 +792,11 @@ class _HomePageState extends State<HomePage> {
           await showDialog<void>(
             context: context,
             builder: (ctx) => AlertDialog(
-              title: Text(mode.skipDialogTitle),
+              title: Text(
+                selectedModes.length > 1
+                    ? '部分字幕无法按所选模式处理'
+                    : mode.skipDialogTitle,
+              ),
               content: SizedBox(
                 width: 480,
                 child: SingleChildScrollView(
@@ -1257,6 +1316,7 @@ class _HomePageState extends State<HomePage> {
     bool match(File? f) => f != null && preferLower.contains(_pathKey(f.path));
     return match(g.chinese?.file) ||
         match(g.foreign?.file) ||
+        g.foreignCandidates.any((ref) => match(ref.file)) ||
         match(g.bilingualSource) ||
         match(g.video);
   }
@@ -1274,6 +1334,9 @@ class _HomePageState extends State<HomePage> {
         group.video,
       ]) {
         if (file != null && file.existsSync()) paths.add(_pathKey(file.path));
+      }
+      for (final ref in group.foreignCandidates) {
+        if (ref.file.existsSync()) paths.add(_pathKey(ref.file.path));
       }
     }
     setState(() => _inputFiles = paths);
@@ -1302,10 +1365,21 @@ class _HomePageState extends State<HomePage> {
           continue;
         }
         if (fresh.chinese != null) existing.chinese = fresh.chinese;
+        for (final ref in fresh.foreignCandidates) {
+          if (!existing.foreignCandidates.any(
+            (current) => _pathKey(current.file.path) == _pathKey(ref.file.path),
+          )) {
+            existing.foreignCandidates.add(ref);
+          }
+        }
         if (fresh.foreign != null) existing.foreign = fresh.foreign;
         existing.foreignTag = fresh.foreignTag;
         FileMatcher.reevaluate(existing);
-        ProcessModeService.apply([existing], _options.processMode);
+        if (_options.processMode.isPairingMode) {
+          ProcessModeService.applySelected([existing], _selectedPairModes);
+        } else {
+          ProcessModeService.apply([existing], _options.processMode);
+        }
       }
       if (_inputFiles.isNotEmpty) {
         _inputFiles.addAll(files.map((file) => _pathKey(file.path)));
@@ -1985,7 +2059,9 @@ class _HomePageState extends State<HomePage> {
           ProcessModePicker(
             mode: mode,
             enabled: !_busy,
-            onChanged: _setProcessMode,
+            selectedPairModes: _selectedPairModes,
+            onPairModesChanged: _setPairModes,
+            onExclusiveModeChanged: _setProcessMode,
           ),
         ],
         SizedBox(height: compact ? 10 : 16),
@@ -2018,6 +2094,9 @@ class _HomePageState extends State<HomePage> {
   Widget _buildActions() {
     final mode = _options.processMode;
     final extract = _isExtractMode;
+    final noSelectedMode =
+        !extract && mode.isPairingMode && _selectedPairModes.isEmpty;
+    final noSelectedExtractPair = extract && _selectedExtractPairModes.isEmpty;
     return AppSurface(
       padding: const EdgeInsets.all(12),
       child: Wrap(
@@ -2027,9 +2106,9 @@ class _HomePageState extends State<HomePage> {
         children: [
           if (extract)
             ExtractPairModePicker(
-              mode: _options.extractPairMode,
+              selectedModes: _selectedExtractPairModes,
               enabled: !_busy,
-              onChanged: _setExtractPairMode,
+              onChanged: _setExtractPairModes,
             )
           else ...[
             _buildOutputDirPicker(),
@@ -2072,6 +2151,16 @@ class _HomePageState extends State<HomePage> {
                 await _persist();
               },
             ),
+            OptionCheck(
+              label: r'\an8 转上方注释',
+              value: _options.an8AsAnnotation,
+              tooltip: r'将含 \an8 的字幕行使用 annotation 系样式',
+              enabled: !_busy,
+              onChanged: (v) async {
+                setState(() => _options.an8AsAnnotation = v);
+                await _persist();
+              },
+            ),
             OutlinedButton.icon(
               onPressed: _busy ? null : _renameOnly,
               icon: const Icon(Icons.drive_file_rename_outline, size: 17),
@@ -2079,7 +2168,9 @@ class _HomePageState extends State<HomePage> {
             ),
           ],
           FilledButton.icon(
-            onPressed: _busy ? null : (extract ? _extractVideos : _run),
+            onPressed: _busy || noSelectedMode || noSelectedExtractPair
+                ? null
+                : (extract ? _extractVideos : _run),
             icon: _busy
                 ? const SizedBox(
                     width: 16,
@@ -2097,7 +2188,13 @@ class _HomePageState extends State<HomePage> {
               _busy
                   ? (extract ? '抽取中' : '处理中')
                   : extract
-                  ? '开始抽轨'
+                  ? noSelectedExtractPair
+                        ? '请选择语言对'
+                        : '开始抽轨'
+                  : noSelectedMode
+                  ? '请选择配对模式'
+                  : mode.isPairingMode && _selectedPairModes.length > 1
+                  ? (_options.tagLanguageOnMerge ? '改名并批量配对' : '开始批量配对')
                   : _options.tagLanguageOnMerge
                   ? mode.actionLabelWithRename
                   : mode.actionLabel,

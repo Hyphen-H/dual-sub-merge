@@ -208,6 +208,62 @@ void main() {
     );
   });
 
+  test('normal English and Dubtitle extraction modes stay distinct', () {
+    final tracks = [
+      SubtitleTrackInfo(
+        id: 1,
+        codec: 'S_TEXT/UTF8',
+        language: 'chi',
+        title: 'Simplified',
+      ),
+      SubtitleTrackInfo(id: 2, codec: 'S_TEXT/UTF8', language: 'eng'),
+      SubtitleTrackInfo(
+        id: 3,
+        codec: 'S_TEXT/UTF8',
+        language: 'eng',
+        title: 'Dubtitle',
+      ),
+      SubtitleTrackInfo(
+        id: 4,
+        codec: 'S_TEXT/UTF8',
+        language: 'eng',
+        title: 'Dubtitle | SDH',
+      ),
+    ];
+
+    expect(tracks[2].isDubtitle, isTrue);
+    expect(tracks[3].isDubtitle, isTrue);
+    final english = TrackSelector.autoSelect(
+      tracks,
+      mode: ExtractPairMode.chsEng,
+    );
+    expect(english.chinese?.id, 1);
+    expect(english.foreign?.id, 2);
+    expect(
+      TrackSelector.autoSelectedIds(tracks, mode: ExtractPairMode.chsEng),
+      {1, 2},
+    );
+
+    final dubtitle = TrackSelector.autoSelect(
+      tracks,
+      mode: ExtractPairMode.chsEngDub,
+    );
+    expect(dubtitle.chinese?.id, 1);
+    expect(dubtitle.foreign?.id, 3);
+    expect(
+      TrackSelector.autoSelectedIds(tracks, mode: ExtractPairMode.chsEngDub),
+      {1, 3},
+    );
+    expect(
+      TrackSelector.autoSelectedIdsForModes(tracks, {
+        ExtractPairMode.chsEng,
+        ExtractPairMode.chsEngDub,
+      }),
+      {1, 2, 3},
+    );
+    expect(LanguageFromName.foreignOutputTag('eng_dub'), 'eng_dub');
+  });
+
   test('Japanese tracks are detected from language and title', () {
     expect(
       SubtitleTrackInfo(id: 1, codec: 'S_TEXT/UTF8', language: 'ja').isJapanese,

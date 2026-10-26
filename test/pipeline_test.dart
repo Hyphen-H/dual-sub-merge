@@ -390,6 +390,19 @@ Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello, world
       expect(LanguageFromName.foreignOutputTag('und'), 'eng');
       expect(LanguageFromName.foreignOutputTag(null), 'eng');
       expect(LanguageFromName.foreignOutputTag('japanese'), 'jpn');
+      expect(LanguageFromName.foreignOutputTag('eng_dub'), 'eng_dub');
+      expect(
+        LanguageFromName.explicitOutputFileTag('Show.eng_dub.srt'),
+        'eng_dub',
+      );
+      expect(
+        LanguageFromName.explicitOutputFileTag('Show.eng_dub.extracted.srt'),
+        'eng_dub',
+      );
+      expect(
+        LanguageFromName.explicitOutputFileTag('Show.dubtitle.srt'),
+        'eng_dub',
+      );
     });
 
     test('displayPrefix strips jpn/ita/etc tokens', () {
@@ -401,12 +414,16 @@ Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello, world
         LanguageFromName.normalizePrefix('Show.chs.extracted.ass'),
         'show',
       );
+      expect(
+        LanguageFromName.normalizePrefix('Show.eng_dub.extracted.ass'),
+        'show',
+      );
     });
   });
 
   group('StyleCatalog.scaleLine', () {
     const dialCh =
-        'Style: Dial-CH,HYQiHei-65S,48,&H4DFFFFFF,&H4DFFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,40,1';
+        'Style: Dial-CH,FZHei-B01,48,&H4DFFFFFF,&H4DFFFFFF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,0,2,10,10,40,1';
 
     test('factor 1 is identity', () {
       expect(StyleCatalog.scaleLine(dialCh, 1.0), dialCh);
@@ -414,7 +431,7 @@ Dialogue: 0,0:00:01.00,0:00:02.00,Default,,0,0,0,,Hello, world
 
     test('720p -> 1080p scales geometry by 1.5', () {
       final scaled = StyleCatalog.scaleLine(dialCh, 1.5);
-      expect(scaled, contains('HYQiHei-65S,72,'));
+      expect(scaled, contains('FZHei-B01,72,'));
       expect(scaled, contains(',3,0,2,15,15,60,1'));
       // colours and alignment untouched
       expect(scaled, contains('&H4DFFFFFF'));

@@ -29,7 +29,7 @@ void main() {
     );
 
     final r = await ChineseConvertService(
-      MergeOptions(),
+      MergeOptions(an8AsAnnotation: true),
     ).convertFile(source: file, outDir: out);
 
     expect(r.ok, isTrue, reason: r.message);
@@ -51,7 +51,7 @@ void main() {
     );
 
     final r = await ChineseConvertService(
-      MergeOptions(),
+      MergeOptions(an8AsAnnotation: true),
     ).convertFile(source: file, outDir: out);
 
     expect(r.ok, isTrue, reason: r.message);
